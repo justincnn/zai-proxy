@@ -1,40 +1,41 @@
-name: Upstream Sync
-
-permissions:
-  contents: write
+name: Sync with Upstream
 
 on:
   schedule:
-    - cron: "0 0 * * *" # every day
-  workflow_dispatch:
+    - cron: '0 0 * * *' # Runs every day at midnight UTC
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
-  sync_latest_from_upstream:
-    name: Sync latest commits from upstream repo
+  sync:
     runs-on: ubuntu-latest
-    if: ${{ github.event.repository.fork }}
-
+    # Grant permissions for the GITHUB_TOKEN to push to the repository
+    permissions:
+      contents: write
     steps:
-      # Step 1: run a standard checkout action
-      - name: Checkout target repo
-        uses: actions/checkout@v3
-
-      # Step 2: run the sync action
-      - name: Sync upstream changes
-        id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          upstream_sync_repo: snailyp/zai-proxy
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # automatically generated, no need to set
+          # We need to fetch all history to merge
+          fetch-depth: 0
 
-          # Set test_mode true to run tests instead of the true action!!
-          test_mode: false
-
-      - name: Sync check
-        if: failure()
+      - name: Configure Git
         run: |
-          echo "[Error] 由于上游仓库的 workflow 文件变更，导致 GitHub 自动暂停了本次自动更新，你需要手动 Sync Fork 一次，详细教程请查看项目README.md "
-          echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork. Please refer to the project README.md for instructions. "
-          exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync with upstream
+        run: |
+          git remote add upstream https://github.com/snailyp/zai-proxy.git
+          git fetch upstream
+          
+          # Assuming the default branch is the one to be synced
+          # This will get the name of the current branch (e.g., main)
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          
+          # Merge changes from upstream's main branch
+          # Using --no-edit to automatically accept the default merge commit message
+          # Using --allow-unrelated-histories in case the fork was created without a common ancestor
+          git merge upstream/main --no-edit --allow-unrelated-histories
+          
+          # Push the merged changes
+          git push origin $CURRENT_BRANCH
