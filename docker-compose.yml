@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  zai-proxy:
+    image: justincnn/zai-proxy:latest-arm64
+    container_name: zai-proxy
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    restart: always
