@@ -114,7 +114,7 @@ def getfeatures(model: str, streaming: bool) -> Dict[str, bool]:
 async def prepare_data(request, access_token, streaming=True):
     convert_dict = convert_messages(request.messages)
     zai_data = {
-        "stream": True,
+        "stream": streaming,
         "model": settings.MODELS_MAPPING.get(request.model),
         "messages": convert_dict["messages"],
         "chat_id": str(uuid.uuid4()),
