@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   zai-proxy:
-    build: .
+    image: justincnn/zai-proxy:latest
     ports:
       - "8001:8001"
     environment:
