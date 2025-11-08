@@ -6,10 +6,5 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - HOST=0.0.0.0
-      - PORT=8001
-      - DEBUG=False
-      - WORKERS=1
-      - LOG_LEVEL=INFO
-      - REQUEST_TIMEOUT=30
+      - PROXY_URL=https://chat.z.ai
     restart: always
