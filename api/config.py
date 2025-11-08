@@ -1,9 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
 from typing import Dict, List
-
-load_dotenv()
 
 
 class Settings(BaseSettings):
@@ -47,9 +44,6 @@ class Settings(BaseSettings):
         "glm-4.5": "0727-360B-API",
     }
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 _settings = None
