@@ -286,6 +286,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 	hasContent := false
 	searchRefFilter := NewSearchRefFilter()
 	thinkingFilter := &ThinkingFilter{}
+	pendingSourcesMarkdown := ""
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -311,7 +312,28 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 
 		// 处理思考阶段的增量内容
 		if upstream.Data.Phase == "thinking" && upstream.Data.DeltaContent != "" {
+			// 如果有待输出的搜索结果，先输出到 reasoning
+			if pendingSourcesMarkdown != "" {
+				hasContent = true
+				chunk := ChatCompletionChunk{
+					ID:      completionID,
+					Object:  "chat.completion.chunk",
+					Created: time.Now().Unix(),
+					Model:   modelName,
+					Choices: []Choice{{
+						Index:        0,
+						Delta:        Delta{ReasoningContent: pendingSourcesMarkdown},
+						FinishReason: nil,
+					}},
+				}
+				data, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				pendingSourcesMarkdown = ""
+			}
+
 			reasoningContent := thinkingFilter.ProcessThinking(upstream.Data.DeltaContent)
+			reasoningContent = searchRefFilter.Process(reasoningContent)
 			if reasoningContent != "" {
 				hasContent = true
 				chunk := ChatCompletionChunk{
@@ -332,17 +354,21 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 			continue
 		}
 
-		// 跳过搜索结果内容和搜索工具调用
-		if upstream.Data.EditContent != "" && (IsSearchResultContent(upstream.Data.EditContent) || IsSearchToolCall(upstream.Data.EditContent, upstream.Data.Phase)) {
+		// 解析搜索结果，暂存等待下一个流决定放在哪里
+		if upstream.Data.EditContent != "" && IsSearchResultContent(upstream.Data.EditContent) {
+			if results := ParseSearchResults(upstream.Data.EditContent); len(results) > 0 {
+				searchRefFilter.AddSearchResults(results)
+				pendingSourcesMarkdown = searchRefFilter.GetSearchResultsMarkdown()
+			}
+			continue
+		}
+		// 跳过搜索工具调用
+		if upstream.Data.EditContent != "" && IsSearchToolCall(upstream.Data.EditContent, upstream.Data.Phase) {
 			continue
 		}
 
-		// 解析 answer 阶段内容
-		content := ""
-		reasoningContent := ""
-
-		// 先输出 thinking 缓冲区剩余内容
-		if thinkingRemaining := thinkingFilter.Flush(); thinkingRemaining != "" {
+		// 进入 answer 阶段，如果有待输出的搜索结果，先输出到 content
+		if pendingSourcesMarkdown != "" {
 			hasContent = true
 			chunk := ChatCompletionChunk{
 				ID:      completionID,
@@ -351,13 +377,39 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 				Model:   modelName,
 				Choices: []Choice{{
 					Index:        0,
-					Delta:        Delta{ReasoningContent: thinkingRemaining},
+					Delta:        Delta{Content: pendingSourcesMarkdown},
 					FinishReason: nil,
 				}},
 			}
 			data, _ := json.Marshal(chunk)
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
+			pendingSourcesMarkdown = ""
+		}
+
+		content := ""
+		reasoningContent := ""
+
+		// 先输出 thinking 缓冲区剩余内容
+		if thinkingRemaining := thinkingFilter.Flush(); thinkingRemaining != "" {
+			thinkingRemaining = searchRefFilter.Process(thinkingRemaining) + searchRefFilter.Flush()
+			if thinkingRemaining != "" {
+				hasContent = true
+				chunk := ChatCompletionChunk{
+					ID:      completionID,
+					Object:  "chat.completion.chunk",
+					Created: time.Now().Unix(),
+					Model:   modelName,
+					Choices: []Choice{{
+						Index:        0,
+						Delta:        Delta{ReasoningContent: thinkingRemaining},
+						FinishReason: nil,
+					}},
+				}
+				data, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
 		}
 
 		if upstream.Data.Phase == "answer" && upstream.Data.DeltaContent != "" {
@@ -376,6 +428,9 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 		}
 
 		// 输出完整思考内容（如果有）
+		if reasoningContent != "" {
+			reasoningContent = searchRefFilter.Process(reasoningContent) + searchRefFilter.Flush()
+		}
 		if reasoningContent != "" {
 			hasContent = true
 			chunk := ChatCompletionChunk{
@@ -475,6 +530,9 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 	var chunks []string
 	var reasoningChunks []string
 	thinkingFilter := &ThinkingFilter{}
+	searchRefFilter := NewSearchRefFilter()
+	hasThinking := false
+	pendingSourcesMarkdown := ""
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -496,8 +554,12 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 			break
 		}
 
-		// 处理思考阶段的增量内容
 		if upstream.Data.Phase == "thinking" && upstream.Data.DeltaContent != "" {
+			if pendingSourcesMarkdown != "" {
+				reasoningChunks = append(reasoningChunks, pendingSourcesMarkdown)
+				pendingSourcesMarkdown = ""
+			}
+			hasThinking = true
 			reasoningContent := thinkingFilter.ProcessThinking(upstream.Data.DeltaContent)
 			if reasoningContent != "" {
 				reasoningChunks = append(reasoningChunks, reasoningContent)
@@ -505,17 +567,27 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 			continue
 		}
 
-		// 跳过搜索结果内容和搜索工具调用
-		if upstream.Data.EditContent != "" && (IsSearchResultContent(upstream.Data.EditContent) || IsSearchToolCall(upstream.Data.EditContent, upstream.Data.Phase)) {
+		if upstream.Data.EditContent != "" && IsSearchResultContent(upstream.Data.EditContent) {
+			if results := ParseSearchResults(upstream.Data.EditContent); len(results) > 0 {
+				searchRefFilter.AddSearchResults(results)
+				pendingSourcesMarkdown = searchRefFilter.GetSearchResultsMarkdown()
+			}
+			continue
+		}
+		if upstream.Data.EditContent != "" && IsSearchToolCall(upstream.Data.EditContent, upstream.Data.Phase) {
 			continue
 		}
 
-		// 解析 answer 阶段内容
+		// 进入 answer 阶段，把待输出的搜索结果放到 content
+		if pendingSourcesMarkdown != "" && !hasThinking {
+			chunks = append(chunks, pendingSourcesMarkdown)
+			pendingSourcesMarkdown = ""
+		}
+
 		content := ""
 		if upstream.Data.Phase == "answer" && upstream.Data.DeltaContent != "" {
 			content = upstream.Data.DeltaContent
 		} else if upstream.Data.Phase == "answer" && upstream.Data.EditContent != "" {
-			// 思考模型首次 answer：提取完整思考内容 + 正常回复开头
 			if strings.Contains(upstream.Data.EditContent, "</details>") {
 				reasoningContent := thinkingFilter.ExtractCompleteThinking(upstream.Data.EditContent)
 				if reasoningContent != "" {
@@ -534,10 +606,10 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 		}
 	}
 
-	// 合并所有内容后统一过滤搜索引用标记
 	fullContent := strings.Join(chunks, "")
-	fullContent = searchRefPattern.ReplaceAllString(fullContent, "")
+	fullContent = searchRefFilter.Process(fullContent) + searchRefFilter.Flush()
 	fullReasoning := strings.Join(reasoningChunks, "")
+	fullReasoning = searchRefFilter.Process(fullReasoning) + searchRefFilter.Flush()
 
 	if fullContent == "" {
 		LogError("Non-stream response 200 but no content received")
