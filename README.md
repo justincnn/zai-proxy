@@ -29,17 +29,16 @@ go mod download
 go run main.go
 ```
 
-### Docker 部署
+### Docker 一键部署
 
 ```bash
-# 构建镜像
-docker build -t zai-proxy .
+docker run -d -p 8000:8000 ghcr.io/kao0312/zai-proxy:latest
+```
 
-# 运行容器
-docker run -p 8000:8000 zai-proxy
+自定义端口和日志级别：
 
-# 使用环境变量
-docker run -p 8000:8000 -e PORT=8080 -e LOG_LEVEL=debug zai-proxy
+```bash
+docker run -d -p 8080:8000 -e LOG_LEVEL=debug ghcr.io/kao0312/zai-proxy:latest
 ```
 
 ## 环境变量
