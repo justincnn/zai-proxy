@@ -65,10 +65,35 @@ func makeUpstreamRequest(token string, messages []Message, model string) (*http.
 		autoWebSearch = false
 	}
 
+	// 上传图片并建立URL→FileID映射
+	urlToFileID := make(map[string]string)
+	var filesData []map[string]interface{}
+	if len(imageURLs) > 0 {
+		files, _ := UploadImages(token, imageURLs)
+		for i, f := range files {
+			if i < len(imageURLs) {
+				urlToFileID[imageURLs[i]] = f.ID
+			}
+			filesData = append(filesData, map[string]interface{}{
+				"type":            f.Type,
+				"file":            f.File,
+				"id":              f.ID,
+				"url":             f.URL,
+				"name":            f.Name,
+				"status":          f.Status,
+				"size":            f.Size,
+				"error":           f.Error,
+				"itemId":          f.ItemID,
+				"media":           f.Media,
+				"ref_user_msg_id": userMsgID,
+			})
+		}
+	}
+
 	// 转换消息为上游格式
-	var upstreamMessages []map[string]string
+	var upstreamMessages []map[string]interface{}
 	for _, msg := range messages {
-		upstreamMessages = append(upstreamMessages, msg.ToUpstreamMessage())
+		upstreamMessages = append(upstreamMessages, msg.ToUpstreamMessage(urlToFileID))
 	}
 
 	body := map[string]interface{}{
@@ -88,34 +113,10 @@ func makeUpstreamRequest(token string, messages []Message, model string) (*http.
 		"id":      uuid.New().String(),
 	}
 
-	// 处理图片上传
-	if len(imageURLs) > 0 {
-		files, err := UploadImages(token, imageURLs)
-		if err != nil {
-			LogError("Failed to upload images: %v", err)
-		}
-		if len(files) > 0 {
-			// 设置 ref_user_msg_id
-			var filesData []map[string]interface{}
-			for _, f := range files {
-				fileMap := map[string]interface{}{
-					"type":            f.Type,
-					"file":            f.File,
-					"id":              f.ID,
-					"url":             f.URL,
-					"name":            f.Name,
-					"status":          f.Status,
-					"size":            f.Size,
-					"error":           f.Error,
-					"itemId":          f.ItemID,
-					"media":           f.Media,
-					"ref_user_msg_id": userMsgID,
-				}
-				filesData = append(filesData, fileMap)
-			}
-			body["files"] = filesData
-			body["current_user_message_id"] = userMsgID
-		}
+	// 添加files字段
+	if len(filesData) > 0 {
+		body["files"] = filesData
+		body["current_user_message_id"] = userMsgID
 	}
 
 	bodyBytes, _ := json.Marshal(body)

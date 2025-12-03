@@ -111,12 +111,40 @@ func (m *Message) ParseContent() (text string, imageURLs []string) {
 	return text, imageURLs
 }
 
-// 转换为上游消息格式（纯文本）
-func (m *Message) ToUpstreamMessage() map[string]string {
-	text, _ := m.ParseContent()
-	return map[string]string{
+// 转换为上游消息格式，支持多模态
+func (m *Message) ToUpstreamMessage(urlToFileID map[string]string) map[string]interface{} {
+	text, imageURLs := m.ParseContent()
+
+	// 无图片，返回纯文本
+	if len(imageURLs) == 0 {
+		return map[string]interface{}{
+			"role":    m.Role,
+			"content": text,
+		}
+	}
+
+	// 有图片，构建多模态内容
+	var content []interface{}
+	if text != "" {
+		content = append(content, map[string]interface{}{
+			"type": "text",
+			"text": text,
+		})
+	}
+	for _, imgURL := range imageURLs {
+		if fileID, ok := urlToFileID[imgURL]; ok {
+			content = append(content, map[string]interface{}{
+				"type": "image_url",
+				"image_url": map[string]interface{}{
+					"url": fileID,
+				},
+			})
+		}
+	}
+
+	return map[string]interface{}{
 		"role":    m.Role,
-		"content": text,
+		"content": content,
 	}
 }
 
