@@ -10,6 +10,7 @@ zai-proxy 是一个基于 Go 语言的代理服务，将 z.ai 网页聊天转换
 - 支持思考模式 (thinking)
 - 支持联网搜索模式 (search)
 - 支持多模态图片输入
+- 支持匿名 Token（免登录）
 - **自动生成签名**
 - **自动更新签名版本号**
 
@@ -49,6 +50,19 @@ docker run -d -p 8080:8000 -e LOG_LEVEL=debug ghcr.io/kao0312/zai-proxy:latest
 | LOG_LEVEL | 日志级别 | info |
 
 ## 获取 z.ai Token
+
+### 方式一：使用匿名 Token（免登录）
+
+直接使用 `free` 作为 API key，服务会自动获取一个匿名 token：
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer free" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "GLM-4.6", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+### 方式二：使用个人 Token
 
 1. 登录 https://chat.z.ai
 2. 打开浏览器开发者工具 (F12)

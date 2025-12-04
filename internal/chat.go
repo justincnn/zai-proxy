@@ -233,6 +233,17 @@ func HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 如果 token 是 "free"，获取匿名 token
+	if token == "free" {
+		anonymousToken, err := GetAnonymousToken()
+		if err != nil {
+			LogError("Failed to get anonymous token: %v", err)
+			http.Error(w, "Failed to get anonymous token", http.StatusInternalServerError)
+			return
+		}
+		token = anonymousToken
+	}
+
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
