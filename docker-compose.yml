@@ -1,0 +1,11 @@
+services:
+  zai-proxy:
+    build: .
+    image: zai-proxy:latest
+    container_name: zai-proxy
+    ports:
+      - "8002:8000"
+    environment:
+      - PORT=8000
+      - LOG_LEVEL=info
+    restart: always
