@@ -1,7 +1,7 @@
 services:
   zai-proxy:
-    build: .
-    image: zai-proxy:latest
+    image: docker.io/justincnn/zai-proxy:latest
+    platform: linux/arm64
     container_name: zai-proxy
     ports:
       - "8002:8000"
