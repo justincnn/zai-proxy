@@ -59,14 +59,7 @@ func makeUpstreamRequest(token string, messages []Message, model string) (*http.
 
 	enableThinking := IsThinkingModel(model)
 	autoWebSearch := IsSearchModel(model)
-	if targetModel == "glm-4.5v" || targetModel == "glm-4.6v" {
-		autoWebSearch = false
-	}
-
 	var mcpServers []string
-	if targetModel == "glm-4.6v" {
-		mcpServers = []string{"vlm-image-search", "vlm-image-recognition", "vlm-image-processing"}
-	}
 
 	urlToFileID := make(map[string]string)
 	var filesData []map[string]interface{}
@@ -281,7 +274,7 @@ func HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Model == "" {
-		req.Model = "GLM-4.6"
+		req.Model = "GLM-5"
 	}
 
 	resp, modelName, err := makeUpstreamRequest(token, req.Messages, req.Model)
