@@ -544,17 +544,14 @@ func findMatchingBrace(s string, start int) int {
 			escapeNext = false
 			continue
 		}
-
 		if ch == '\\' {
 			escapeNext = true
 			continue
 		}
-
 		if ch == '"' {
 			inString = !inString
 			continue
 		}
-
 		if inString {
 			continue
 		}
@@ -572,47 +569,125 @@ func findMatchingBrace(s string, start int) int {
 	return -1
 }
 
+func toArgumentsString(v interface{}) string {
+	switch a := v.(type) {
+	case nil:
+		return "{}"
+	case string:
+		return a
+	default:
+		b, err := json.Marshal(a)
+		if err != nil {
+			return "{}"
+		}
+		return string(b)
+	}
+}
+
+func parseOneToolCall(raw map[string]interface{}) (ToolCall, bool) {
+	if raw == nil {
+		return ToolCall{}, false
+	}
+
+	callType, _ := raw["type"].(string)
+	if callType == "" {
+		callType = "function"
+	}
+	id, _ := raw["id"].(string)
+
+	if functionObj, ok := raw["function"].(map[string]interface{}); ok {
+		name, _ := functionObj["name"].(string)
+		if name == "" {
+			return ToolCall{}, false
+		}
+		return ToolCall{
+			ID:   id,
+			Type: callType,
+			Function: ToolFunction{
+				Name:      name,
+				Arguments: toArgumentsString(functionObj["arguments"]),
+			},
+		}, true
+	}
+
+	name, _ := raw["name"].(string)
+	if name == "" {
+		return ToolCall{}, false
+	}
+
+	return ToolCall{
+		ID:   id,
+		Type: callType,
+		Function: ToolFunction{
+			Name:      name,
+			Arguments: toArgumentsString(raw["arguments"]),
+		},
+	}, true
+}
+
+func parseToolCallsFromJSON(jsonStr string) ([]ToolCall, bool) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
+		return nil, false
+	}
+
+	if rawCalls, ok := obj["tool_calls"].([]interface{}); ok {
+		var toolCalls []ToolCall
+		for _, item := range rawCalls {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if tc, ok := parseOneToolCall(m); ok {
+				toolCalls = append(toolCalls, tc)
+			}
+		}
+		if len(toolCalls) > 0 {
+			return toolCalls, true
+		}
+	}
+
+	if tc, ok := parseOneToolCall(obj); ok {
+		return []ToolCall{tc}, true
+	}
+
+	return nil, false
+}
+
 func ExtractToolCallsFromContent(content string) ([]ToolCall, string, bool) {
+	trimmed := strings.TrimSpace(content)
+	if toolCalls, ok := parseToolCallsFromJSON(trimmed); ok {
+		return toolCalls, "", true
+	}
+
+	if startFence := strings.Index(content, "```"); startFence != -1 {
+		if endFence := strings.Index(content[startFence+3:], "```"); endFence != -1 {
+			endFence = startFence + 3 + endFence
+			fenced := content[startFence+3 : endFence]
+			fenced = strings.TrimSpace(strings.TrimPrefix(fenced, "json"))
+			if toolCalls, ok := parseToolCallsFromJSON(strings.TrimSpace(fenced)); ok {
+				remaining := strings.TrimSpace(content[:startFence] + content[endFence+3:])
+				return toolCalls, remaining, true
+			}
+		}
+	}
+
 	idx := strings.Index(content, `"tool_calls"`)
 	if idx == -1 {
 		return nil, content, false
 	}
-
 	start := strings.LastIndex(content[:idx], "{")
 	if start == -1 {
 		return nil, content, false
 	}
-
 	end := findMatchingBrace(content, start)
 	if end == -1 {
 		return nil, content, false
 	}
 
 	jsonPart := content[start : end+1]
-	var raw struct {
-		ToolCalls []struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"tool_calls"`
-	}
-	if err := json.Unmarshal([]byte(jsonPart), &raw); err != nil || len(raw.ToolCalls) == 0 {
-		return nil, content, false
-	}
-
-	var toolCalls []ToolCall
-	for _, tc := range raw.ToolCalls {
-		if tc.Name == "" {
-			continue
-		}
-		toolCalls = append(toolCalls, ToolCall{
-			Type: "function",
-			Function: ToolFunction{
-				Name:      tc.Name,
-				Arguments: tc.Arguments,
-			},
-		})
-	}
-	if len(toolCalls) == 0 {
+	toolCalls, ok := parseToolCallsFromJSON(jsonPart)
+	if !ok {
 		return nil, content, false
 	}
 
