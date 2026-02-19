@@ -33,7 +33,7 @@ func extractAllImageURLs(messages []Message) []string {
 	return allImageURLs
 }
 
-func makeUpstreamRequest(token string, messages []Message, model string) (*http.Response, string, error) {
+func makeUpstreamRequest(token string, messages []Message, model string, tools interface{}, toolChoice interface{}) (*http.Response, string, error) {
 	payload, err := DecodeJWTPayload(token)
 	if err != nil || payload == nil {
 		return nil, "", fmt.Errorf("invalid token")
@@ -109,6 +109,13 @@ func makeUpstreamRequest(token string, messages []Message, model string) (*http.
 
 	if len(mcpServers) > 0 {
 		body["mcp_servers"] = mcpServers
+	}
+
+	if tools != nil {
+		body["tools"] = tools
+	}
+	if toolChoice != nil {
+		body["tool_choice"] = toolChoice
 	}
 
 	if len(filesData) > 0 {
@@ -277,7 +284,7 @@ func HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		req.Model = "GLM-5"
 	}
 
-	resp, modelName, err := makeUpstreamRequest(token, req.Messages, req.Model)
+	resp, modelName, err := makeUpstreamRequest(token, req.Messages, req.Model, req.Tools, req.ToolChoice)
 	if err != nil {
 		LogError("Upstream request failed: %v", err)
 		http.Error(w, "Upstream error", http.StatusBadGateway)
@@ -790,11 +797,19 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 	fullReasoning := strings.Join(reasoningChunks, "")
 	fullReasoning = searchRefFilter.Process(fullReasoning) + searchRefFilter.Flush()
 
-	if fullContent == "" {
+	toolCalls, cleanedContent, hasToolCalls := ExtractToolCallsFromContent(fullContent)
+	if hasToolCalls {
+		fullContent = cleanedContent
+	}
+
+	if fullContent == "" && !hasToolCalls {
 		LogError("Non-stream response 200 but no content received")
 	}
 
 	stopReason := "stop"
+	if hasToolCalls {
+		stopReason = "tool_calls"
+	}
 	response := ChatCompletionResponse{
 		ID:      completionID,
 		Object:  "chat.completion",
@@ -806,6 +821,7 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 				Role:             "assistant",
 				Content:          fullContent,
 				ReasoningContent: fullReasoning,
+				ToolCalls:        toolCalls,
 			},
 			FinishReason: &stopReason,
 		}},

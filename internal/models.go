@@ -140,9 +140,11 @@ func (m *Message) ToUpstreamMessage(urlToFileID map[string]string) map[string]in
 }
 
 type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model      string      `json:"model"`
+	Messages   []Message   `json:"messages"`
+	Stream     bool        `json:"stream"`
+	Tools      interface{} `json:"tools,omitempty"`
+	ToolChoice interface{} `json:"tool_choice,omitempty"`
 }
 
 type ChatCompletionChunk struct {
@@ -161,14 +163,27 @@ type Choice struct {
 }
 
 type Delta struct {
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type MessageResp struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type ChatCompletionResponse struct {
@@ -511,4 +526,96 @@ func ExtractTextBeforeGlmBlock(editContent string) string {
 		return text
 	}
 	return ""
+}
+
+func findMatchingBrace(s string, start int) int {
+	if start < 0 || start >= len(s) || s[start] != '{' {
+		return -1
+	}
+
+	depth := 0
+	inString := false
+	escapeNext := false
+
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+
+		if escapeNext {
+			escapeNext = false
+			continue
+		}
+
+		if ch == '\\' {
+			escapeNext = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+func ExtractToolCallsFromContent(content string) ([]ToolCall, string, bool) {
+	idx := strings.Index(content, `"tool_calls"`)
+	if idx == -1 {
+		return nil, content, false
+	}
+
+	start := strings.LastIndex(content[:idx], "{")
+	if start == -1 {
+		return nil, content, false
+	}
+
+	end := findMatchingBrace(content, start)
+	if end == -1 {
+		return nil, content, false
+	}
+
+	jsonPart := content[start : end+1]
+	var raw struct {
+		ToolCalls []struct {
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		} `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(jsonPart), &raw); err != nil || len(raw.ToolCalls) == 0 {
+		return nil, content, false
+	}
+
+	var toolCalls []ToolCall
+	for _, tc := range raw.ToolCalls {
+		if tc.Name == "" {
+			continue
+		}
+		toolCalls = append(toolCalls, ToolCall{
+			Type: "function",
+			Function: ToolFunction{
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
+			},
+		})
+	}
+	if len(toolCalls) == 0 {
+		return nil, content, false
+	}
+
+	remaining := strings.TrimSpace(content[:start] + content[end+1:])
+	return toolCalls, remaining, true
 }
