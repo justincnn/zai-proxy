@@ -1,231 +1,29 @@
-package internal
+package filter
 
 import (
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"zai-proxy/internal/model"
 )
-
-// 基础模型映射（不包含标签后缀）
-var BaseModelMapping = map[string]string{
-	"GLM-4.5":      "0727-360B-API",
-	"GLM-4.6":      "GLM-4-6-API-V1",
-	"GLM-4.7":      "glm-4.7",
-	"GLM-4.5-V":    "glm-4.5v",
-	"GLM-4.6-V":    "glm-4.6v",
-	"GLM-4.5-Air":  "0727-106B-API",
-	"0808-360B-DR": "0808-360B-DR",
-}
-
-// v1/models 返回的模型列表（不包含所有标签组合）
-var ModelList = []string{
-	"GLM-4.5",
-	"GLM-4.6",
-	"GLM-4.7",
-	"GLM-4.7-thinking",
-	"GLM-4.7-thinking-search",
-	"GLM-4.5-V",
-	"GLM-4.6-V",
-	"GLM-4.6-V-thinking",
-	"GLM-4.5-Air",
-	// "0808-360B-DR",
-}
-
-// 解析模型名称，提取基础模型名和标签
-// 支持 -thinking 和 -search 标签的任意排列组合
-func ParseModelName(model string) (baseModel string, enableThinking bool, enableSearch bool) {
-	enableThinking = false
-	enableSearch = false
-	baseModel = model
-
-	// 检查并移除 -thinking 和 -search 标签（任意顺序）
-	for {
-		if strings.HasSuffix(baseModel, "-thinking") {
-			enableThinking = true
-			baseModel = strings.TrimSuffix(baseModel, "-thinking")
-		} else if strings.HasSuffix(baseModel, "-search") {
-			enableSearch = true
-			baseModel = strings.TrimSuffix(baseModel, "-search")
-		} else {
-			break
-		}
-	}
-
-	return baseModel, enableThinking, enableSearch
-}
-
-func IsThinkingModel(model string) bool {
-	_, enableThinking, _ := ParseModelName(model)
-	return enableThinking
-}
-
-func IsSearchModel(model string) bool {
-	_, _, enableSearch := ParseModelName(model)
-	return enableSearch
-}
-
-func GetTargetModel(model string) string {
-	baseModel, _, _ := ParseModelName(model)
-	if target, ok := BaseModelMapping[baseModel]; ok {
-		return target
-	}
-	return model
-}
-
-// OpenAI 格式的消息内容项
-type ContentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *ImageURL `json:"image_url,omitempty"`
-}
-
-type ImageURL struct {
-	URL string `json:"url"`
-}
-
-// Message 支持纯文本和多模态内容
-type Message struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string 或 []ContentPart
-}
-
-// 解析消息内容，返回文本和图片URL列表
-func (m *Message) ParseContent() (text string, imageURLs []string) {
-	switch content := m.Content.(type) {
-	case string:
-		return content, nil
-	case []interface{}:
-		for _, item := range content {
-			if part, ok := item.(map[string]interface{}); ok {
-				partType, _ := part["type"].(string)
-				if partType == "text" {
-					if t, ok := part["text"].(string); ok {
-						text += t
-					}
-				} else if partType == "image_url" {
-					if imgURL, ok := part["image_url"].(map[string]interface{}); ok {
-						if url, ok := imgURL["url"].(string); ok {
-							imageURLs = append(imageURLs, url)
-						}
-					}
-				}
-			}
-		}
-	}
-	return text, imageURLs
-}
-
-// 转换为上游消息格式，支持多模态
-func (m *Message) ToUpstreamMessage(urlToFileID map[string]string) map[string]interface{} {
-	text, imageURLs := m.ParseContent()
-
-	// 无图片，返回纯文本
-	if len(imageURLs) == 0 {
-		return map[string]interface{}{
-			"role":    m.Role,
-			"content": text,
-		}
-	}
-
-	// 有图片，构建多模态内容
-	var content []interface{}
-	if text != "" {
-		content = append(content, map[string]interface{}{
-			"type": "text",
-			"text": text,
-		})
-	}
-	for _, imgURL := range imageURLs {
-		if fileID, ok := urlToFileID[imgURL]; ok {
-			content = append(content, map[string]interface{}{
-				"type": "image_url",
-				"image_url": map[string]interface{}{
-					"url": fileID,
-				},
-			})
-		}
-	}
-
-	return map[string]interface{}{
-		"role":    m.Role,
-		"content": content,
-	}
-}
-
-type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
-}
-
-type ChatCompletionChunk struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-}
-
-type Choice struct {
-	Index        int          `json:"index"`
-	Delta        Delta        `json:"delta,omitempty"`
-	Message      *MessageResp `json:"message,omitempty"`
-	FinishReason *string      `json:"finish_reason"`
-}
-
-type Delta struct {
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-}
-
-type MessageResp struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
-}
-
-type ChatCompletionResponse struct {
-	ID      string   `json:"id"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Model   string   `json:"model"`
-	Choices []Choice `json:"choices"`
-}
-
-type ModelsResponse struct {
-	Object string      `json:"object"`
-	Data   []ModelInfo `json:"data"`
-}
-
-type ModelInfo struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	OwnedBy string `json:"owned_by"`
-}
 
 var searchRefPattern = regexp.MustCompile(`【turn\d+search(\d+)】`)
 var searchRefPrefixPattern = regexp.MustCompile(`【(t(u(r(n(\d+(s(e(a(r(c(h(\d+)?)?)?)?)?)?)?)?)?)?)?)?$`)
 
-type SearchResult struct {
-	Title string `json:"title"`
-	URL   string `json:"url"`
-	Index int    `json:"index"`
-	RefID string `json:"ref_id"`
-}
-
 type SearchRefFilter struct {
 	buffer        string
-	searchResults map[string]SearchResult
+	searchResults map[string]model.SearchResult
 }
 
 func NewSearchRefFilter() *SearchRefFilter {
 	return &SearchRefFilter{
-		searchResults: make(map[string]SearchResult),
+		searchResults: make(map[string]model.SearchResult),
 	}
 }
 
-func (f *SearchRefFilter) AddSearchResults(results []SearchResult) {
+func (f *SearchRefFilter) AddSearchResults(results []model.SearchResult) {
 	for _, r := range results {
 		f.searchResults[r.RefID] = r
 	}
@@ -296,7 +94,7 @@ func (f *SearchRefFilter) GetSearchResultsMarkdown() string {
 		return ""
 	}
 
-	var results []SearchResult
+	var results []model.SearchResult
 	for _, r := range f.searchResults {
 		results = append(results, r)
 	}
@@ -321,7 +119,7 @@ func IsSearchResultContent(editContent string) bool {
 	return strings.Contains(editContent, `"search_result"`)
 }
 
-func ParseSearchResults(editContent string) []SearchResult {
+func ParseSearchResults(editContent string) []model.SearchResult {
 	searchResultKey := `"search_result":`
 	idx := strings.Index(editContent, searchResultKey)
 	if idx == -1 {
@@ -367,9 +165,9 @@ func ParseSearchResults(editContent string) []SearchResult {
 		return nil
 	}
 
-	var results []SearchResult
+	var results []model.SearchResult
 	for _, r := range rawResults {
-		results = append(results, SearchResult{
+		results = append(results, model.SearchResult{
 			Title: r.Title,
 			URL:   r.URL,
 			Index: r.Index,
@@ -384,17 +182,10 @@ func IsSearchToolCall(editContent string, phase string) bool {
 	if phase != "tool_call" {
 		return false
 	}
-	// tool_call 阶段包含 mcp 相关内容的都跳过
 	return strings.Contains(editContent, `"mcp"`) || strings.Contains(editContent, `mcp-server`)
 }
 
-type ImageSearchResult struct {
-	Title     string `json:"title"`
-	Link      string `json:"link"`
-	Thumbnail string `json:"thumbnail"`
-}
-
-func ParseImageSearchResults(editContent string) []ImageSearchResult {
+func ParseImageSearchResults(editContent string) []model.ImageSearchResult {
 	resultKey := `"result":`
 	idx := strings.Index(editContent, resultKey)
 	if idx == -1 {
@@ -457,7 +248,7 @@ func ParseImageSearchResults(editContent string) []ImageSearchResult {
 		return nil
 	}
 
-	var results []ImageSearchResult
+	var results []model.ImageSearchResult
 	for _, item := range rawResults {
 		if itemType, ok := item["type"].(string); ok && itemType == "text" {
 			if text, ok := item["text"].(string); ok {
@@ -472,8 +263,8 @@ func ParseImageSearchResults(editContent string) []ImageSearchResult {
 	return results
 }
 
-func parseImageSearchText(text string) ImageSearchResult {
-	result := ImageSearchResult{}
+func parseImageSearchText(text string) model.ImageSearchResult {
+	result := model.ImageSearchResult{}
 
 	if titleIdx := strings.Index(text, "Title: "); titleIdx != -1 {
 		titleStart := titleIdx + len("Title: ")
@@ -501,7 +292,7 @@ func parseImageSearchText(text string) ImageSearchResult {
 	return result
 }
 
-func FormatImageSearchResults(results []ImageSearchResult) string {
+func FormatImageSearchResults(results []model.ImageSearchResult) string {
 	if len(results) == 0 {
 		return ""
 	}

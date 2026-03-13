@@ -1,4 +1,4 @@
-package internal
+package version
 
 import (
 	"io"
@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"zai-proxy/internal/logger"
 )
 
 var (
@@ -22,14 +24,14 @@ func GetFeVersion() string {
 func fetchFeVersion() {
 	resp, err := http.Get("https://chat.z.ai/")
 	if err != nil {
-		LogError("Failed to fetch fe version: %v", err)
+		logger.LogError("Failed to fetch fe version: %v", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		LogError("Failed to read fe version response: %v", err)
+		logger.LogError("Failed to read fe version response: %v", err)
 		return
 	}
 
@@ -39,7 +41,7 @@ func fetchFeVersion() {
 		versionLock.Lock()
 		feVersion = match
 		versionLock.Unlock()
-		LogInfo("Updated fe version: %s", match)
+		logger.LogInfo("Updated fe version: %s", match)
 	}
 }
 

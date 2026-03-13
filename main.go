@@ -3,20 +3,23 @@ package main
 import (
 	"net/http"
 
-	"zai-proxy/internal"
+	"zai-proxy/internal/config"
+	"zai-proxy/internal/handler"
+	"zai-proxy/internal/logger"
+	"zai-proxy/internal/version"
 )
 
 func main() {
-	internal.LoadConfig()
-	internal.InitLogger()
-	internal.StartVersionUpdater()
+	config.LoadConfig()
+	logger.InitLogger()
+	version.StartVersionUpdater()
 
-	http.HandleFunc("/v1/models", internal.HandleModels)
-	http.HandleFunc("/v1/chat/completions", internal.HandleChatCompletions)
+	http.HandleFunc("/v1/models", handler.HandleModels)
+	http.HandleFunc("/v1/chat/completions", handler.HandleChatCompletions)
 
-	addr := ":" + internal.Cfg.Port
-	internal.LogInfo("Server starting on %s", addr)
+	addr := ":" + config.Cfg.Port
+	logger.LogInfo("Server starting on %s", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
-		internal.LogError("Server failed: %v", err)
+		logger.LogError("Server failed: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-package internal
+package upstream
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+
+	"zai-proxy/internal/logger"
 )
 
 // FileUploadResponse z.ai 文件上传响应
@@ -49,14 +51,13 @@ func UploadImageFromURL(token string, imageURL string) (*UpstreamFile, error) {
 
 	if strings.HasPrefix(imageURL, "data:") {
 		// Base64 编码的图片
-		// 格式: data:image/jpeg;base64,/9j/4AAQ...
 		parts := strings.SplitN(imageURL, ",", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("invalid base64 image format")
 		}
 
 		// 解析 MIME 类型
-		header := parts[0] // data:image/jpeg;base64
+		header := parts[0]
 		if idx := strings.Index(header, ":"); idx != -1 {
 			mimeAndEncoding := header[idx+1:]
 			if semiIdx := strings.Index(mimeAndEncoding, ";"); semiIdx != -1 {
@@ -160,7 +161,6 @@ func UploadImageFromURL(token string, imageURL string) (*UpstreamFile, error) {
 		return nil, fmt.Errorf("failed to parse upload response: %v", err)
 	}
 
-	// 构建上游文件格式
 	return &UpstreamFile{
 		Type:   "image",
 		File:   uploadResp,
@@ -181,7 +181,7 @@ func UploadImages(token string, imageURLs []string) ([]*UpstreamFile, error) {
 	for _, url := range imageURLs {
 		file, err := UploadImageFromURL(token, url)
 		if err != nil {
-			LogError("Failed to upload image %s: %v", url[:min(50, len(url))], err)
+			logger.LogError("Failed to upload image %s: %v", url[:min(50, len(url))], err)
 			continue
 		}
 		files = append(files, file)
