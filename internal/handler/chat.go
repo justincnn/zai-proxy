@@ -101,6 +101,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 		logger.LogDebug("[Upstream] %s", line)
 
 		if !strings.HasPrefix(line, "data: ") {
+			logger.LogInfo("[DEBUG-Stream] non-data line: %s", truncate(line, 200))
 			continue
 		}
 
@@ -111,8 +112,11 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 
 		var upstreamData model.UpstreamData
 		if err := json.Unmarshal([]byte(payload), &upstreamData); err != nil {
+			logger.LogInfo("[DEBUG-Stream] JSON parse error: %v, payload=%s", err, truncate(payload, 300))
 			continue
 		}
+
+		logger.LogInfo("[DEBUG-Stream] phase=%s delta_content_len=%d edit_content_len=%d", upstreamData.Data.Phase, len(upstreamData.Data.DeltaContent), len(upstreamData.Data.EditContent))
 
 		if upstreamData.Data.Phase == "done" {
 			break
@@ -424,14 +428,37 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 						sendContentChunk(w, flusher, completionID, modelName, safeContent)
 					}
 				}
-				// 检查是否有完整的闭合标签
+				// 查找闭合标签：</tool_call>、</think>、或下一个 <tool_call>
+				afterOpen := promptToolBuffer[len("<tool_call>"):]
 				closeIdx := strings.Index(promptToolBuffer, "</tool_call>")
-				if closeIdx == -1 {
-					// 未闭合，等待更多数据
+				thinkCloseIdx := strings.Index(afterOpen, "</think>")
+				nextOpenIdx := strings.Index(afterOpen, "<tool_call>")
+
+				// 选择最近的闭合位置
+				blockEnd := -1
+				if closeIdx != -1 {
+					blockEnd = closeIdx + len("</tool_call>")
+				}
+				if thinkCloseIdx != -1 {
+					candidate := len("<tool_call>") + thinkCloseIdx + len("</think>")
+					if blockEnd == -1 || candidate < blockEnd {
+						blockEnd = candidate
+					}
+				}
+				if nextOpenIdx != -1 {
+					// 下一个 <tool_call> 隐式关闭当前块
+					candidate := len("<tool_call>") + nextOpenIdx
+					if blockEnd == -1 || candidate < blockEnd {
+						blockEnd = candidate
+					}
+				}
+
+				if blockEnd == -1 {
+					// 未找到任何闭合标记，等待更多数据
 					break
 				}
+
 				// 提取完整块
-				blockEnd := closeIdx + len("</tool_call>")
 				block := promptToolBuffer[:blockEnd]
 				promptToolBuffer = promptToolBuffer[blockEnd:]
 
@@ -586,8 +613,11 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 
 		var upstreamData model.UpstreamData
 		if err := json.Unmarshal([]byte(payload), &upstreamData); err != nil {
+			logger.LogInfo("[DEBUG-NonStream] JSON parse error: %v, payload=%s", err, truncate(payload, 200))
 			continue
 		}
+
+		logger.LogInfo("[DEBUG-NonStream] phase=%s delta_content_len=%d edit_content_len=%d", upstreamData.Data.Phase, len(upstreamData.Data.DeltaContent), len(upstreamData.Data.EditContent))
 
 		if upstreamData.Data.Phase == "done" {
 			break
@@ -761,4 +791,11 @@ func sendContentChunk(w http.ResponseWriter, flusher http.Flusher, completionID,
 	data, _ := json.Marshal(chunk)
 	fmt.Fprintf(w, "data: %s\n\n", data)
 	flusher.Flush()
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
