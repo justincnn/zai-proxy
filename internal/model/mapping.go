@@ -13,6 +13,42 @@ var BaseModelMapping = map[string]string{
 	"0808-360B-DR": "0808-360B-DR",
 }
 
+// Claude 模型名到 GLM 基础模型名的映射
+var ClaudeModelMapping = map[string]string{
+	"claude-opus-4-6":           "GLM-4.7",
+	"claude-opus-4-5-20250514":  "GLM-4.7",
+	"claude-sonnet-4-6":         "GLM-4.7",
+	"claude-sonnet-4-5-20241022": "GLM-4.7",
+	"claude-haiku-4-5":          "GLM-4.5-Air",
+	"claude-haiku-4-5-20251001": "GLM-4.5-Air",
+	"claude-3-5-sonnet-20241022": "GLM-4.7",
+	"claude-3-5-haiku-20241022":  "GLM-4.5-Air",
+}
+
+// ResolveClaudeModel maps a Claude model name to a GLM model name with appropriate tags.
+// Returns the resolved model name and whether thinking should be enabled.
+func ResolveClaudeModel(model string, thinkingEnabled bool) (resolvedModel string, enableThinking bool) {
+	base, ok := ClaudeModelMapping[model]
+	if !ok {
+		// Unknown model: fallback to GLM-4.7
+		base = "GLM-4.7"
+	}
+
+	enableThinking = thinkingEnabled
+	// Opus models always enable thinking
+	if strings.Contains(model, "opus") {
+		enableThinking = true
+	}
+
+	resolvedModel = base
+	if enableThinking {
+		resolvedModel += "-thinking"
+	}
+	// Always enable tools for Claude requests (handled via prompt injection)
+	resolvedModel += "-tools"
+	return resolvedModel, enableThinking
+}
+
 // v1/models 返回的模型列表（不包含所有标签组合）
 var ModelList = []string{
 	"GLM-4.5",
@@ -76,5 +112,6 @@ func GetTargetModel(model string) string {
 	if target, ok := BaseModelMapping[baseModel]; ok {
 		return target
 	}
-	return model
+	// Fallback: unknown models default to glm-4.7
+	return "glm-4.7"
 }
