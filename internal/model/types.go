@@ -160,7 +160,7 @@ type ChatCompletionChunk struct {
 
 type Choice struct {
 	Index        int          `json:"index"`
-	Delta        Delta        `json:"delta,omitempty"`
+	Delta        *Delta       `json:"delta,omitempty"`
 	Message      *MessageResp `json:"message,omitempty"`
 	FinishReason *string      `json:"finish_reason"`
 }

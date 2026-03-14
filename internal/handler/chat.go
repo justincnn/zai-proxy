@@ -94,6 +94,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 	totalContentOutputLength := 0
 	hasToolCalls := false
 	var collectedToolCalls []model.ToolCall
+	promptToolBuffer := "" // 用于 prompt 注入模式下缓冲 answer 文本以检测 <tool_call>
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -145,7 +146,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 						Model:   modelName,
 						Choices: []model.Choice{{
 							Index:        0,
-							Delta:        model.Delta{ReasoningContent: reasoningContent},
+							Delta:        &model.Delta{ReasoningContent: reasoningContent},
 							FinishReason: nil,
 						}},
 					}
@@ -182,7 +183,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 						Model:   modelName,
 						Choices: []model.Choice{{
 							Index:        0,
-							Delta:        model.Delta{Content: textBeforeBlock},
+							Delta:        &model.Delta{Content: textBeforeBlock},
 							FinishReason: nil,
 						}},
 					}
@@ -209,7 +210,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 						Model:   modelName,
 						Choices: []model.Choice{{
 							Index:        0,
-							Delta:        model.Delta{Content: textBeforeBlock},
+							Delta:        &model.Delta{Content: textBeforeBlock},
 							FinishReason: nil,
 						}},
 					}
@@ -247,7 +248,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 						Model:   modelName,
 						Choices: []model.Choice{{
 							Index: 0,
-							Delta: model.Delta{
+							Delta: &model.Delta{
 								ToolCalls: []model.ToolCall{tc},
 							},
 							FinishReason: nil,
@@ -270,7 +271,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 				Model:   modelName,
 				Choices: []model.Choice{{
 					Index:        0,
-					Delta:        model.Delta{Content: pendingSourcesMarkdown},
+					Delta:        &model.Delta{Content: pendingSourcesMarkdown},
 					FinishReason: nil,
 				}},
 			}
@@ -288,7 +289,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 				Model:   modelName,
 				Choices: []model.Choice{{
 					Index:        0,
-					Delta:        model.Delta{Content: pendingImageSearchMarkdown},
+					Delta:        &model.Delta{Content: pendingImageSearchMarkdown},
 					FinishReason: nil,
 				}},
 			}
@@ -313,7 +314,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 					Model:   modelName,
 					Choices: []model.Choice{{
 						Index:        0,
-						Delta:        model.Delta{ReasoningContent: processedRemaining},
+						Delta:        &model.Delta{ReasoningContent: processedRemaining},
 						FinishReason: nil,
 					}},
 				}
@@ -332,7 +333,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 				Model:   modelName,
 				Choices: []model.Choice{{
 					Index:        0,
-					Delta:        model.Delta{ReasoningContent: pendingSourcesMarkdown},
+					Delta:        &model.Delta{ReasoningContent: pendingSourcesMarkdown},
 					FinishReason: nil,
 				}},
 			}
@@ -382,7 +383,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 				Model:   modelName,
 				Choices: []model.Choice{{
 					Index:        0,
-					Delta:        model.Delta{ReasoningContent: reasoningContent},
+					Delta:        &model.Delta{ReasoningContent: reasoningContent},
 					FinishReason: nil,
 				}},
 			}
@@ -405,6 +406,63 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 			totalContentOutputLength += len([]rune(content))
 		}
 
+		// prompt 注入模式：缓冲 answer 文本，检测 <tool_call> 块
+		if len(tools) > 0 {
+			promptToolBuffer += content
+			// 循环提取完整的 <tool_call>...</tool_call> 块
+			for {
+				openIdx := strings.Index(promptToolBuffer, "<tool_call>")
+				if openIdx == -1 {
+					// 无 <tool_call> 标签，全部安全输出
+					break
+				}
+				// 输出 <tool_call> 之前的安全文本
+				if openIdx > 0 {
+					safeContent := promptToolBuffer[:openIdx]
+					promptToolBuffer = promptToolBuffer[openIdx:]
+					if safeContent != "" {
+						sendContentChunk(w, flusher, completionID, modelName, safeContent)
+					}
+				}
+				// 检查是否有完整的闭合标签
+				closeIdx := strings.Index(promptToolBuffer, "</tool_call>")
+				if closeIdx == -1 {
+					// 未闭合，等待更多数据
+					break
+				}
+				// 提取完整块
+				blockEnd := closeIdx + len("</tool_call>")
+				block := promptToolBuffer[:blockEnd]
+				promptToolBuffer = promptToolBuffer[blockEnd:]
+
+				// 解析 tool call
+				_, toolCalls := filter.ExtractPromptToolCalls(block)
+				if len(toolCalls) > 0 {
+					collectedToolCalls = append(collectedToolCalls, toolCalls...)
+					hasToolCalls = true
+					for _, tc := range toolCalls {
+						chunk := model.ChatCompletionChunk{
+							ID:      completionID,
+							Object:  "chat.completion.chunk",
+							Created: time.Now().Unix(),
+							Model:   modelName,
+							Choices: []model.Choice{{
+								Index: 0,
+								Delta: &model.Delta{
+									ToolCalls: []model.ToolCall{tc},
+								},
+								FinishReason: nil,
+							}},
+						}
+						data, _ := json.Marshal(chunk)
+						fmt.Fprintf(w, "data: %s\n\n", data)
+						flusher.Flush()
+					}
+				}
+			}
+			continue
+		}
+
 		chunk := model.ChatCompletionChunk{
 			ID:      completionID,
 			Object:  "chat.completion.chunk",
@@ -412,7 +470,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 			Model:   modelName,
 			Choices: []model.Choice{{
 				Index:        0,
-				Delta:        model.Delta{Content: content},
+				Delta:        &model.Delta{Content: content},
 				FinishReason: nil,
 			}},
 		}
@@ -426,6 +484,39 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 		logger.LogError("[Upstream] scanner error: %v", err)
 	}
 
+	// prompt 注入模式：flush 缓冲区中剩余的文本
+	if promptToolBuffer != "" {
+		// 尝试最后一次提取 tool calls
+		cleanContent, toolCalls := filter.ExtractPromptToolCalls(promptToolBuffer)
+		if len(toolCalls) > 0 {
+			collectedToolCalls = append(collectedToolCalls, toolCalls...)
+			hasToolCalls = true
+			for _, tc := range toolCalls {
+				chunk := model.ChatCompletionChunk{
+					ID:      completionID,
+					Object:  "chat.completion.chunk",
+					Created: time.Now().Unix(),
+					Model:   modelName,
+					Choices: []model.Choice{{
+						Index: 0,
+						Delta: &model.Delta{
+							ToolCalls: []model.ToolCall{tc},
+						},
+						FinishReason: nil,
+					}},
+				}
+				data, _ := json.Marshal(chunk)
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
+		}
+		if cleanContent != "" {
+			sendContentChunk(w, flusher, completionID, modelName, cleanContent)
+			hasContent = true
+		}
+		promptToolBuffer = ""
+	}
+
 	if remaining := searchRefFilter.Flush(); remaining != "" {
 		hasContent = true
 		chunk := model.ChatCompletionChunk{
@@ -435,7 +526,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 			Model:   modelName,
 			Choices: []model.Choice{{
 				Index:        0,
-				Delta:        model.Delta{Content: remaining},
+				Delta:        &model.Delta{Content: remaining},
 				FinishReason: nil,
 			}},
 		}
@@ -459,7 +550,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 		Model:   modelName,
 		Choices: []model.Choice{{
 			Index:        0,
-			Delta:        model.Delta{},
+			Delta:        &model.Delta{},
 			FinishReason: &stopReason,
 		}},
 	}
@@ -616,6 +707,15 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 	fullReasoning := strings.Join(reasoningChunks, "")
 	fullReasoning = searchRefFilter.Process(fullReasoning) + searchRefFilter.Flush()
 
+	// prompt 注入模式：从 answer 文本中提取 <tool_call> 块
+	if len(tools) > 0 && len(collectedToolCalls) == 0 {
+		cleanContent, promptToolCalls := filter.ExtractPromptToolCalls(fullContent)
+		if len(promptToolCalls) > 0 {
+			collectedToolCalls = promptToolCalls
+			fullContent = cleanContent
+		}
+	}
+
 	if fullContent == "" && len(collectedToolCalls) == 0 {
 		logger.LogError("Non-stream response 200 but no content received")
 	}
@@ -643,4 +743,22 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// sendContentChunk 发送一个 content SSE chunk
+func sendContentChunk(w http.ResponseWriter, flusher http.Flusher, completionID, modelName, content string) {
+	chunk := model.ChatCompletionChunk{
+		ID:      completionID,
+		Object:  "chat.completion.chunk",
+		Created: time.Now().Unix(),
+		Model:   modelName,
+		Choices: []model.Choice{{
+			Index:        0,
+			Delta:        &model.Delta{Content: content},
+			FinishReason: nil,
+		}},
+	}
+	data, _ := json.Marshal(chunk)
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
 }

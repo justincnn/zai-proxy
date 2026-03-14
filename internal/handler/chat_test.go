@@ -574,3 +574,76 @@ func TestNonStreamResponse_FullFormat(t *testing.T) {
 		t.Errorf("Role = %q", resp.Choices[0].Message.Role)
 	}
 }
+
+// ===== 流式：prompt 注入模式 <tool_call> 在 answer 文本中 =====
+
+func TestStreamResponse_PromptInjectionToolCall(t *testing.T) {
+	body := newFakeBody(
+		sseEvent("answer", "好的，我来查询。\n", ""),
+		sseEvent("answer", `<tool_call>{"name":"get_weather","arguments":{"city":"北京"}}</tool_call>`, ""),
+		sseEventDone(),
+	)
+
+	w := httptest.NewRecorder()
+	handleStreamResponse(w, body, "chatcmpl-test", "glm-4.7", dummyTools())
+
+	result := w.Body.String()
+
+	if !strings.Contains(result, `"tool_calls"`) {
+		t.Error("missing tool_calls in prompt injection stream")
+	}
+	if !strings.Contains(result, `"get_weather"`) {
+		t.Error("missing function name")
+	}
+	if !strings.Contains(result, `"finish_reason":"tool_calls"`) {
+		t.Error("finish_reason should be tool_calls")
+	}
+}
+
+// ===== 非流式：prompt 注入模式 =====
+
+func TestNonStreamResponse_PromptInjectionToolCall(t *testing.T) {
+	body := newFakeBody(
+		sseEvent("answer", "我来查询天气。\n<tool_call>{\"name\":\"get_weather\",\"arguments\":{\"city\":\"上海\"}}</tool_call>", ""),
+		sseEventDone(),
+	)
+
+	w := httptest.NewRecorder()
+	handleNonStreamResponse(w, body, "chatcmpl-test", "glm-4.7", dummyTools())
+
+	var resp model.ChatCompletionResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	msg := resp.Choices[0].Message
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("len(ToolCalls) = %d, want 1", len(msg.ToolCalls))
+	}
+	if msg.ToolCalls[0].Function.Name != "get_weather" {
+		t.Errorf("Function.Name = %q", msg.ToolCalls[0].Function.Name)
+	}
+	if strings.Contains(msg.Content, "<tool_call>") {
+		t.Error("content should not contain <tool_call> tags")
+	}
+	if *resp.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("FinishReason = %q, want tool_calls", *resp.Choices[0].FinishReason)
+	}
+}
+
+// ===== 非流式：response 中不应有 delta 字段 =====
+
+func TestNonStreamResponse_NoDeltaField(t *testing.T) {
+	body := newFakeBody(
+		sseEvent("answer", "hello", ""),
+		sseEventDone(),
+	)
+
+	w := httptest.NewRecorder()
+	handleNonStreamResponse(w, body, "chatcmpl-test", "glm-4.7", nil)
+
+	result := w.Body.String()
+	if strings.Contains(result, `"delta"`) {
+		t.Error("non-streaming response should not contain delta field")
+	}
+}

@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -423,7 +424,7 @@ func TestChunkWithToolCallsFinishReason(t *testing.T) {
 		Model:   "glm-4.7",
 		Choices: []Choice{{
 			Index:        0,
-			Delta:        Delta{},
+			Delta:        &Delta{},
 			FinishReason: &reason,
 		}},
 	}
@@ -499,5 +500,43 @@ func TestCompletionResponseWithToolCalls(t *testing.T) {
 	}
 	if *decoded.Choices[0].FinishReason != "tool_calls" {
 		t.Errorf("FinishReason = %q", *decoded.Choices[0].FinishReason)
+	}
+}
+
+// ===== Delta 指针：nil 时不出现在 JSON 中 =====
+
+func TestChoiceDeltaNil_OmittedInJSON(t *testing.T) {
+	reason := "stop"
+	choice := Choice{
+		Index: 0,
+		Message: &MessageResp{
+			Role:    "assistant",
+			Content: "hello",
+		},
+		FinishReason: &reason,
+	}
+
+	data, _ := json.Marshal(choice)
+	s := string(data)
+	if strings.Contains(s, `"delta"`) {
+		t.Errorf("nil Delta should be omitted, got: %s", s)
+	}
+}
+
+// ===== Delta 指针：非 nil 时正常序列化 =====
+
+func TestChoiceDeltaNotNil_SerializedInJSON(t *testing.T) {
+	choice := Choice{
+		Index: 0,
+		Delta: &Delta{Content: "test content"},
+	}
+
+	data, _ := json.Marshal(choice)
+	s := string(data)
+	if !strings.Contains(s, `"delta"`) {
+		t.Error("non-nil Delta should appear in JSON")
+	}
+	if !strings.Contains(s, `"test content"`) {
+		t.Error("Delta content should be serialized")
 	}
 }

@@ -94,9 +94,60 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 		}
 	}
 
+	// 当使用 -tools 模型时，自动注入内置工具（客户端自带工具优先）
+	if model.IsToolsModel(modelName) {
+		clientToolNames := make(map[string]bool)
+		for _, t := range tools {
+			clientToolNames[t.Function.Name] = true
+		}
+		for _, bt := range builtintools.GetBuiltinTools() {
+			if !clientToolNames[bt.Function.Name] {
+				tools = append(tools, bt)
+			}
+		}
+	}
+
 	var upstreamMessages []map[string]interface{}
+	hasPromptTools := len(tools) > 0
 	for _, msg := range messages {
+		if hasPromptTools {
+			// prompt 注入模式：将 tool_calls / tool 结果转为纯文本
+			if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+				text, _ := msg.ParseContent()
+				callText := builtintools.ConvertToolCallToText(msg.ToolCalls)
+				if text != "" {
+					text = text + "\n" + callText
+				} else {
+					text = callText
+				}
+				upstreamMessages = append(upstreamMessages, map[string]interface{}{
+					"role":    "assistant",
+					"content": text,
+				})
+				continue
+			}
+			if msg.Role == "tool" {
+				text, _ := msg.ParseContent()
+				upstreamMessages = append(upstreamMessages, map[string]interface{}{
+					"role":    "user",
+					"content": builtintools.ConvertToolResultToText(msg.ToolCallID, text),
+				})
+				continue
+			}
+		}
 		upstreamMessages = append(upstreamMessages, msg.ToUpstreamMessage(urlToFileID))
+	}
+
+	// 工具注入：通过 system prompt 注入工具定义（z.ai 不支持原生 tools 字段）
+	if len(tools) > 0 {
+		toolSystemPrompt := builtintools.BuildToolSystemPrompt(tools, toolChoice)
+		if toolSystemPrompt != "" {
+			systemMsg := map[string]interface{}{
+				"role":    "system",
+				"content": toolSystemPrompt,
+			}
+			upstreamMessages = append([]map[string]interface{}{systemMsg}, upstreamMessages...)
+		}
 	}
 
 	body := map[string]interface{}{
@@ -118,26 +169,6 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 
 	if len(mcpServers) > 0 {
 		body["mcp_servers"] = mcpServers
-	}
-
-	// 当使用 -tools 模型时，自动注入内置工具（客户端自带工具优先）
-	if model.IsToolsModel(modelName) {
-		clientToolNames := make(map[string]bool)
-		for _, t := range tools {
-			clientToolNames[t.Function.Name] = true
-		}
-		for _, bt := range builtintools.GetBuiltinTools() {
-			if !clientToolNames[bt.Function.Name] {
-				tools = append(tools, bt)
-			}
-		}
-	}
-
-	if len(tools) > 0 {
-		body["tools"] = tools
-		if toolChoice != nil {
-			body["tool_choice"] = toolChoice
-		}
 	}
 
 	if len(filesData) > 0 {
