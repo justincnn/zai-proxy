@@ -1,3 +1,6 @@
 .env
 *.exe
 *.cmd
+PROJECT_STRUCTURE.md
+hello.txt
+psychoanalysis.txt
