@@ -17,23 +17,14 @@ func BuildToolSystemPrompt(tools []model.Tool, toolChoice interface{}) string {
 
 	var sb strings.Builder
 
-	sb.WriteString("# 工具调用规则\n\n")
-	sb.WriteString("你可以使用下面列出的工具。当你需要调用工具时，**必须严格使用以下 XML 格式**输出调用请求（不要使用 markdown 代码块、不要使用 [TOOL] 或其他格式）：\n\n")
+	sb.WriteString("你的运行环境已接入工具执行系统。当你在回复中输出 <tool_call> 标签时，系统会自动拦截并执行对应的工具，然后将结果返回给你。这不是模拟，你确实拥有此能力。\n\n")
+	sb.WriteString("调用格式（严格遵守）：\n")
 	sb.WriteString("<tool_call>{\"name\": \"函数名\", \"arguments\": {\"参数名\": \"参数值\"}}</tool_call>\n\n")
-	sb.WriteString("**重要规则：**\n")
-	sb.WriteString("- 你不能自行执行工具，只能输出 <tool_call> 标签，由系统执行后将结果返回给你\n")
-	sb.WriteString("- 每个工具调用必须独立包裹在 <tool_call></tool_call> 标签中\n")
+	sb.WriteString("规则：\n")
+	sb.WriteString("- 每个调用独立包裹在 <tool_call></tool_call> 中\n")
 	sb.WriteString("- arguments 必须是合法 JSON 对象\n")
-	sb.WriteString("- 不要在 <tool_call> 标签外描述调用参数\n\n")
-
-	sb.WriteString("## 示例\n\n")
-	sb.WriteString("用户: 帮我创建一个文件 test.txt 内容为 hello\n")
-	sb.WriteString("助手: 好的，我来为您创建文件。\n")
-	sb.WriteString("<tool_call>{\"name\": \"create_file\", \"arguments\": {\"filename\": \"test.txt\", \"content\": \"hello\"}}</tool_call>\n\n")
-	sb.WriteString("用户: 查询北京和上海的天气\n")
-	sb.WriteString("助手: 我来查询这两个城市的天气。\n")
-	sb.WriteString("<tool_call>{\"name\": \"get_weather\", \"arguments\": {\"location\": \"北京\"}}</tool_call>\n")
-	sb.WriteString("<tool_call>{\"name\": \"get_weather\", \"arguments\": {\"location\": \"上海\"}}</tool_call>\n\n")
+	sb.WriteString("- 当用户请求可以通过工具完成时，必须直接输出 <tool_call> 标签，不要说「我无法调用」\n")
+	sb.WriteString("- 可以在 <tool_call> 之前输出简短说明文字\n\n")
 
 	sb.WriteString("## 可用工具\n\n")
 
@@ -66,7 +57,7 @@ func BuildToolSystemPrompt(tools []model.Tool, toolChoice interface{}) string {
 			// tool_choice = {"type": "function", "function": {"name": "xxx"}}
 			if fn, ok := tc["function"].(map[string]interface{}); ok {
 				if name, ok := fn["name"].(string); ok {
-					sb.WriteString(fmt.Sprintf("**你必须调用工具 \"%s\"，使用 <tool_call> 标签输出调用。**\n", name))
+					sb.WriteString(fmt.Sprintf("**你必须调用工具 \"%s\"，且只能调用该工具。无论用户说什么，你的回复中必须包含 <tool_call> 标签调用该工具。**\n", name))
 				}
 			}
 		}
