@@ -20,6 +20,8 @@ var ModelList = []string{
 	"GLM-4.7",
 	"GLM-4.7-thinking",
 	"GLM-4.7-thinking-search",
+	"GLM-4.7-tools",
+	"GLM-4.7-tools-thinking",
 	"GLM-4.5-V",
 	"GLM-4.6-V",
 	"GLM-4.6-V-thinking",
@@ -28,13 +30,14 @@ var ModelList = []string{
 }
 
 // 解析模型名称，提取基础模型名和标签
-// 支持 -thinking 和 -search 标签的任意排列组合
-func ParseModelName(model string) (baseModel string, enableThinking bool, enableSearch bool) {
+// 支持 -thinking、-search 和 -tools 标签的任意排列组合
+func ParseModelName(model string) (baseModel string, enableThinking bool, enableSearch bool, enableTools bool) {
 	enableThinking = false
 	enableSearch = false
+	enableTools = false
 	baseModel = model
 
-	// 检查并移除 -thinking 和 -search 标签（任意顺序）
+	// 检查并移除 -thinking、-search 和 -tools 标签（任意顺序）
 	for {
 		if strings.HasSuffix(baseModel, "-thinking") {
 			enableThinking = true
@@ -42,26 +45,34 @@ func ParseModelName(model string) (baseModel string, enableThinking bool, enable
 		} else if strings.HasSuffix(baseModel, "-search") {
 			enableSearch = true
 			baseModel = strings.TrimSuffix(baseModel, "-search")
+		} else if strings.HasSuffix(baseModel, "-tools") {
+			enableTools = true
+			baseModel = strings.TrimSuffix(baseModel, "-tools")
 		} else {
 			break
 		}
 	}
 
-	return baseModel, enableThinking, enableSearch
+	return baseModel, enableThinking, enableSearch, enableTools
 }
 
 func IsThinkingModel(model string) bool {
-	_, enableThinking, _ := ParseModelName(model)
+	_, enableThinking, _, _ := ParseModelName(model)
 	return enableThinking
 }
 
 func IsSearchModel(model string) bool {
-	_, _, enableSearch := ParseModelName(model)
+	_, _, enableSearch, _ := ParseModelName(model)
 	return enableSearch
 }
 
+func IsToolsModel(model string) bool {
+	_, _, _, enableTools := ParseModelName(model)
+	return enableTools
+}
+
 func GetTargetModel(model string) string {
-	baseModel, _, _ := ParseModelName(model)
+	baseModel, _, _, _ := ParseModelName(model)
 	if target, ok := BaseModelMapping[baseModel]; ok {
 		return target
 	}

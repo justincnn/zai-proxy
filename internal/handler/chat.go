@@ -45,7 +45,7 @@ func HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		req.Model = "GLM-4.6"
 	}
 
-	resp, modelName, err := upstream.MakeUpstreamRequest(token, req.Messages, req.Model)
+	resp, modelName, err := upstream.MakeUpstreamRequest(token, req.Messages, req.Model, req.Tools, req.ToolChoice)
 	if err != nil {
 		logger.LogError("Upstream request failed: %v", err)
 		http.Error(w, "Upstream error", http.StatusBadGateway)
@@ -67,13 +67,13 @@ func HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	completionID := fmt.Sprintf("chatcmpl-%s", uuid.New().String()[:29])
 
 	if req.Stream {
-		handleStreamResponse(w, resp.Body, completionID, modelName)
+		handleStreamResponse(w, resp.Body, completionID, modelName, req.Tools)
 	} else {
-		handleNonStreamResponse(w, resp.Body, completionID, modelName)
+		handleNonStreamResponse(w, resp.Body, completionID, modelName, req.Tools)
 	}
 }
 
-func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionID, modelName string) {
+func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionID, modelName string, tools []model.Tool) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -92,6 +92,8 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 	pendingSourcesMarkdown := ""
 	pendingImageSearchMarkdown := ""
 	totalContentOutputLength := 0
+	hasToolCalls := false
+	var collectedToolCalls []model.ToolCall
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -219,6 +221,43 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 			continue
 		}
 		if editContent != "" && filter.IsSearchToolCall(editContent, upstreamData.Data.Phase) {
+			continue
+		}
+		// 检测用户定义的函数调用（tool_call 阶段，非 mcp/search）
+		if upstreamData.Data.Phase == "tool_call" && editContent != "" {
+			logger.LogInfo("[ToolCall] phase=%s edit_content=%s", upstreamData.Data.Phase, editContent)
+		}
+		if len(tools) > 0 && editContent != "" && filter.IsFunctionToolCall(editContent, upstreamData.Data.Phase) {
+			if toolCalls := filter.ParseFunctionToolCalls(editContent); len(toolCalls) > 0 {
+				for i := range toolCalls {
+					if toolCalls[i].ID == "" {
+						toolCalls[i].ID = fmt.Sprintf("call_%s", uuid.New().String()[:24])
+					}
+					toolCalls[i].Index = i
+				}
+				collectedToolCalls = toolCalls
+				hasToolCalls = true
+
+				for _, tc := range toolCalls {
+					hasContent = true
+					chunk := model.ChatCompletionChunk{
+						ID:      completionID,
+						Object:  "chat.completion.chunk",
+						Created: time.Now().Unix(),
+						Model:   modelName,
+						Choices: []model.Choice{{
+							Index: 0,
+							Delta: model.Delta{
+								ToolCalls: []model.ToolCall{tc},
+							},
+							FinishReason: nil,
+						}},
+					}
+					data, _ := json.Marshal(chunk)
+					fmt.Fprintf(w, "data: %s\n\n", data)
+					flusher.Flush()
+				}
+			}
 			continue
 		}
 
@@ -410,6 +449,9 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 	}
 
 	stopReason := "stop"
+	if hasToolCalls && len(collectedToolCalls) > 0 {
+		stopReason = "tool_calls"
+	}
 	finalChunk := model.ChatCompletionChunk{
 		ID:      completionID,
 		Object:  "chat.completion.chunk",
@@ -428,7 +470,7 @@ func handleStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionI
 	flusher.Flush()
 }
 
-func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionID, modelName string) {
+func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completionID, modelName string, tools []model.Tool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	var chunks []string
@@ -438,6 +480,7 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 	hasThinking := false
 	pendingSourcesMarkdown := ""
 	pendingImageSearchMarkdown := ""
+	var collectedToolCalls []model.ToolCall
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -510,6 +553,22 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 		if editContent != "" && filter.IsSearchToolCall(editContent, upstreamData.Data.Phase) {
 			continue
 		}
+		// 检测用户定义的函数调用
+		if upstreamData.Data.Phase == "tool_call" && editContent != "" {
+			logger.LogInfo("[ToolCall] phase=%s edit_content=%s", upstreamData.Data.Phase, editContent)
+		}
+		if len(tools) > 0 && editContent != "" && filter.IsFunctionToolCall(editContent, upstreamData.Data.Phase) {
+			if toolCalls := filter.ParseFunctionToolCalls(editContent); len(toolCalls) > 0 {
+				for i := range toolCalls {
+					if toolCalls[i].ID == "" {
+						toolCalls[i].ID = fmt.Sprintf("call_%s", uuid.New().String()[:24])
+					}
+					toolCalls[i].Index = i
+				}
+				collectedToolCalls = toolCalls
+			}
+			continue
+		}
 
 		if pendingSourcesMarkdown != "" {
 			if hasThinking {
@@ -557,11 +616,14 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 	fullReasoning := strings.Join(reasoningChunks, "")
 	fullReasoning = searchRefFilter.Process(fullReasoning) + searchRefFilter.Flush()
 
-	if fullContent == "" {
+	if fullContent == "" && len(collectedToolCalls) == 0 {
 		logger.LogError("Non-stream response 200 but no content received")
 	}
 
 	stopReason := "stop"
+	if len(collectedToolCalls) > 0 {
+		stopReason = "tool_calls"
+	}
 	response := model.ChatCompletionResponse{
 		ID:      completionID,
 		Object:  "chat.completion",
@@ -573,6 +635,7 @@ func handleNonStreamResponse(w http.ResponseWriter, body io.ReadCloser, completi
 				Role:             "assistant",
 				Content:          fullContent,
 				ReasoningContent: fullReasoning,
+				ToolCalls:        collectedToolCalls,
 			},
 			FinishReason: &stopReason,
 		}},

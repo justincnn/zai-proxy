@@ -13,10 +13,39 @@ type ImageURL struct {
 	URL string `json:"url"`
 }
 
+// Tool 工具定义（OpenAI 兼容）
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction 函数定义
+type ToolFunction struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Parameters  interface{} `json:"parameters,omitempty"`
+}
+
+// ToolCall 模型返回的工具调用
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+	Index    int          `json:"index"`
+}
+
+// FunctionCall 函数调用（名称 + 参数 JSON 字符串）
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 // Message 支持纯文本和多模态内容
 type Message struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"` // string 或 []ContentPart
+	Role       string      `json:"role"`
+	Content    interface{} `json:"content"`              // string 或 []ContentPart
+	ToolCallID string      `json:"tool_call_id,omitempty"` // role: "tool" 时使用
+	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`   // role: "assistant" 时使用
 }
 
 // 解析消息内容，返回文本和图片URL列表
@@ -47,6 +76,37 @@ func (m *Message) ParseContent() (text string, imageURLs []string) {
 
 // 转换为上游消息格式，支持多模态
 func (m *Message) ToUpstreamMessage(urlToFileID map[string]string) map[string]interface{} {
+	// tool 消息：包含 tool_call_id
+	if m.Role == "tool" {
+		msg := map[string]interface{}{
+			"role":         m.Role,
+			"content":      m.Content,
+			"tool_call_id": m.ToolCallID,
+		}
+		return msg
+	}
+
+	// assistant 消息带 tool_calls
+	if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+		msg := map[string]interface{}{
+			"role":    m.Role,
+			"content": m.Content,
+		}
+		var toolCalls []map[string]interface{}
+		for _, tc := range m.ToolCalls {
+			toolCalls = append(toolCalls, map[string]interface{}{
+				"id":   tc.ID,
+				"type": tc.Type,
+				"function": map[string]interface{}{
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
+				},
+			})
+		}
+		msg["tool_calls"] = toolCalls
+		return msg
+	}
+
 	text, imageURLs := m.ParseContent()
 
 	// 无图片，返回纯文本
@@ -83,9 +143,11 @@ func (m *Message) ToUpstreamMessage(urlToFileID map[string]string) map[string]in
 }
 
 type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model      string      `json:"model"`
+	Messages   []Message   `json:"messages"`
+	Stream     bool        `json:"stream"`
+	Tools      []Tool      `json:"tools,omitempty"`
+	ToolChoice interface{} `json:"tool_choice,omitempty"`
 }
 
 type ChatCompletionChunk struct {
@@ -96,8 +158,6 @@ type ChatCompletionChunk struct {
 	Choices []Choice `json:"choices"`
 }
 
-type
-
 type Choice struct {
 	Index        int          `json:"index"`
 	Delta        Delta        `json:"delta,omitempty"`
@@ -106,14 +166,16 @@ type Choice struct {
 }
 
 type Delta struct {
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type MessageResp struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string     `json:"role"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
 }
 
 type ChatCompletionResponse struct {
