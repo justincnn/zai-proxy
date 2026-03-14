@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/corpix/uarand"
 	"github.com/google/uuid"
 
 	"zai-proxy/internal/auth"
+	"zai-proxy/internal/logger"
 	"zai-proxy/internal/model"
 	builtintools "zai-proxy/internal/tools"
 	"zai-proxy/internal/version"
@@ -109,7 +111,23 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 
 	var upstreamMessages []map[string]interface{}
 	hasPromptTools := len(tools) > 0
+
+	// 提取 system 消息并转为 user+assistant 对注入对话开头
+	// z.ai 会忽略 system 角色消息
+	var systemTexts []string
+	var nonSystemMessages []model.Message
 	for _, msg := range messages {
+		if msg.Role == "system" {
+			text, _ := msg.ParseContent()
+			if text != "" {
+				systemTexts = append(systemTexts, text)
+			}
+		} else {
+			nonSystemMessages = append(nonSystemMessages, msg)
+		}
+	}
+
+	for _, msg := range nonSystemMessages {
 		if hasPromptTools {
 			// prompt 注入模式：将 tool_calls / tool 结果转为纯文本
 			if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
@@ -138,16 +156,37 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 		upstreamMessages = append(upstreamMessages, msg.ToUpstreamMessage(urlToFileID))
 	}
 
-	// 工具注入：通过 system prompt 注入工具定义（z.ai 不支持原生 tools 字段）
+	// 工具注入：通过 user+assistant 对话注入工具定义
+	// z.ai 会忽略 system 角色消息，因此使用 user/assistant 模拟注入
 	if len(tools) > 0 {
 		toolSystemPrompt := builtintools.BuildToolSystemPrompt(tools, toolChoice)
 		if toolSystemPrompt != "" {
-			systemMsg := map[string]interface{}{
-				"role":    "system",
+			logger.LogDebug("[ToolPrompt] Injecting tool system prompt (%d bytes, %d tools)", len(toolSystemPrompt), len(tools))
+			userPromptMsg := map[string]interface{}{
+				"role":    "user",
 				"content": toolSystemPrompt,
 			}
-			upstreamMessages = append([]map[string]interface{}{systemMsg}, upstreamMessages...)
+			assistantAckMsg := map[string]interface{}{
+				"role":    "assistant",
+				"content": "好的，我已了解可用工具。当需要使用工具时，我会直接输出 <tool_call> 标签进行调用。",
+			}
+			upstreamMessages = append([]map[string]interface{}{userPromptMsg, assistantAckMsg}, upstreamMessages...)
 		}
+	}
+
+	// system 消息注入：通过 user+assistant 对注入对话开头
+	if len(systemTexts) > 0 {
+		combinedSystem := strings.Join(systemTexts, "\n\n")
+		logger.LogDebug("[System] Injecting system message as user+assistant pair (%d bytes)", len(combinedSystem))
+		systemUserMsg := map[string]interface{}{
+			"role":    "user",
+			"content": "[System Instructions]\n" + combinedSystem,
+		}
+		systemAssistantMsg := map[string]interface{}{
+			"role":    "assistant",
+			"content": "Understood. I will follow these instructions.",
+		}
+		upstreamMessages = append([]map[string]interface{}{systemUserMsg, systemAssistantMsg}, upstreamMessages...)
 	}
 
 	body := map[string]interface{}{
@@ -177,6 +216,18 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 	}
 
 	bodyBytes, _ := json.Marshal(body)
+
+	// Debug: log the messages being sent
+	if len(tools) > 0 {
+		for i, msg := range upstreamMessages {
+			role, _ := msg["role"].(string)
+			content, _ := msg["content"].(string)
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			logger.LogDebug("[ToolPrompt] msg[%d] role=%s content=%s", i, role, content)
+		}
+	}
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
