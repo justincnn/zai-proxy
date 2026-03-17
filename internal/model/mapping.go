@@ -2,41 +2,39 @@ package model
 
 import "strings"
 
-// 基础模型映射（不包含标签后缀）
+// 基础模型映射（key 全部小写，不包含标签后缀）
 var BaseModelMapping = map[string]string{
-	"GLM-4.5":      "0727-360B-API",
-	"GLM-4.6":      "GLM-4-6-API-V1",
-	"GLM-4.7":      "glm-4.7",
-	"GLM-4.5-V":    "glm-4.5v",
-	"GLM-4.6-V":    "glm-4.6v",
-	"GLM-4.5-Air":  "0727-106B-API",
-	"0808-360B-DR": "0808-360B-DR",
+	"glm-4.5":      "0727-360B-API",
+	"glm-4.6":      "GLM-4-6-API-V1",
+	"glm-4.7":      "glm-4.7",
+	"glm-5":        "glm-5",
+	"glm-4.5-v":    "glm-4.5v",
+	"glm-4.6-v":    "glm-4.6v",
+	"glm-4.5-air":  "0727-106B-API",
+	"0808-360b-dr": "0808-360B-DR",
 }
 
 // Claude 模型名到 GLM 基础模型名的映射
 var ClaudeModelMapping = map[string]string{
-	"claude-opus-4-6":           "GLM-4.7",
-	"claude-opus-4-5-20250514":  "GLM-4.7",
-	"claude-sonnet-4-6":         "GLM-4.7",
-	"claude-sonnet-4-5-20241022": "GLM-4.7",
-	"claude-haiku-4-5":          "GLM-4.5-Air",
-	"claude-haiku-4-5-20251001": "GLM-4.5-Air",
-	"claude-3-5-sonnet-20241022": "GLM-4.7",
-	"claude-3-5-haiku-20241022":  "GLM-4.5-Air",
+	"claude-opus-4-6":            "glm-4.7",
+	"claude-opus-4-5-20250514":   "glm-4.7",
+	"claude-sonnet-4-6":          "glm-4.7",
+	"claude-sonnet-4-5-20241022": "glm-4.7",
+	"claude-haiku-4-5":           "glm-4.5-air",
+	"claude-haiku-4-5-20251001":  "glm-4.5-air",
+	"claude-3-5-sonnet-20241022": "glm-4.7",
+	"claude-3-5-haiku-20241022":  "glm-4.5-air",
 }
 
 // ResolveClaudeModel maps a Claude model name to a GLM model name with appropriate tags.
-// Returns the resolved model name and whether thinking should be enabled.
 func ResolveClaudeModel(model string, thinkingEnabled bool) (resolvedModel string, enableThinking bool) {
-	base, ok := ClaudeModelMapping[model]
+	base, ok := ClaudeModelMapping[strings.ToLower(model)]
 	if !ok {
-		// Unknown model: fallback to GLM-4.7
-		base = "GLM-4.7"
+		base = "glm-4.7"
 	}
 
 	enableThinking = thinkingEnabled
-	// Opus models always enable thinking
-	if strings.Contains(model, "opus") {
+	if strings.Contains(strings.ToLower(model), "opus") {
 		enableThinking = true
 	}
 
@@ -44,36 +42,38 @@ func ResolveClaudeModel(model string, thinkingEnabled bool) (resolvedModel strin
 	if enableThinking {
 		resolvedModel += "-thinking"
 	}
-	// Always enable tools for Claude requests (handled via prompt injection)
 	resolvedModel += "-tools"
 	return resolvedModel, enableThinking
 }
 
-// v1/models 返回的模型列表（不包含所有标签组合）
+// v1/models 返回的模型列表（全部小写）
 var ModelList = []string{
-	"GLM-4.5",
-	"GLM-4.6",
-	"GLM-4.7",
-	"GLM-4.7-thinking",
-	"GLM-4.7-thinking-search",
-	"GLM-4.7-tools",
-	"GLM-4.7-tools-thinking",
-	"GLM-4.5-V",
-	"GLM-4.6-V",
-	"GLM-4.6-V-thinking",
-	"GLM-4.5-Air",
-	// "0808-360B-DR",
+	"glm-4.5",
+	"glm-4.6",
+	"glm-4.7",
+	"glm-4.7-thinking",
+	"glm-4.7-thinking-search",
+	"glm-4.7-tools",
+	"glm-4.7-tools-thinking",
+	"glm-5",
+	"glm-5-thinking",
+	"glm-5-thinking-search",
+	"glm-5-tools",
+	"glm-5-tools-thinking",
+	"glm-4.5-v",
+	"glm-4.6-v",
+	"glm-4.6-v-thinking",
+	"glm-4.5-air",
 }
 
 // 解析模型名称，提取基础模型名和标签
-// 支持 -thinking、-search 和 -tools 标签的任意排列组合
+// 输入大小写不敏感，输出的 baseModel 为小写
 func ParseModelName(model string) (baseModel string, enableThinking bool, enableSearch bool, enableTools bool) {
 	enableThinking = false
 	enableSearch = false
 	enableTools = false
-	baseModel = model
+	baseModel = strings.ToLower(model)
 
-	// 检查并移除 -thinking、-search 和 -tools 标签（任意顺序）
 	for {
 		if strings.HasSuffix(baseModel, "-thinking") {
 			enableThinking = true
@@ -112,6 +112,5 @@ func GetTargetModel(model string) string {
 	if target, ok := BaseModelMapping[baseModel]; ok {
 		return target
 	}
-	// Fallback: unknown models default to glm-4.7
 	return "glm-4.7"
 }

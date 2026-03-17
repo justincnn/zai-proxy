@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"zai-proxy/internal/logger"
+	"zai-proxy/internal/proxy"
 )
 
 // FileUploadResponse z.ai 文件上传响应
@@ -87,7 +88,7 @@ func UploadImageFromURL(token string, imageURL string) (*UpstreamFile, error) {
 		filename = uuid.New().String()[:12] + ext
 	} else {
 		// 从 URL 下载图片
-		resp, err := http.Get(imageURL)
+		resp, err := proxy.GetHTTPClient().Get(imageURL)
 		if err != nil {
 			return nil, fmt.Errorf("failed to download image: %v", err)
 		}
@@ -144,7 +145,7 @@ func UploadImageFromURL(token string, imageURL string) (*UpstreamFile, error) {
 	req.Header.Set("Origin", "https://chat.z.ai")
 	req.Header.Set("Referer", "https://chat.z.ai/")
 
-	client := &http.Client{}
+	client := proxy.GetHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload image: %v", err)

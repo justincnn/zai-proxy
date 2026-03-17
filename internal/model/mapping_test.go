@@ -6,17 +6,27 @@ import "testing"
 
 func TestParseModelName_Plain(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7")
-	if base != "GLM-4.7" {
-		t.Errorf("base = %q, want %q", base, "GLM-4.7")
+	if base != "glm-4.7" {
+		t.Errorf("base = %q, want %q", base, "glm-4.7")
 	}
 	if thinking || search || tools {
 		t.Errorf("flags = (%v, %v, %v), want all false", thinking, search, tools)
 	}
 }
 
+func TestParseModelName_Lowercase(t *testing.T) {
+	base, thinking, _, _ := ParseModelName("glm-4.7-thinking")
+	if base != "glm-4.7" {
+		t.Errorf("base = %q, want %q", base, "glm-4.7")
+	}
+	if !thinking {
+		t.Error("thinking should be true")
+	}
+}
+
 func TestParseModelName_Thinking(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-thinking")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !thinking {
@@ -29,7 +39,7 @@ func TestParseModelName_Thinking(t *testing.T) {
 
 func TestParseModelName_Search(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-search")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !search {
@@ -42,7 +52,7 @@ func TestParseModelName_Search(t *testing.T) {
 
 func TestParseModelName_Tools(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-tools")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !tools {
@@ -55,7 +65,7 @@ func TestParseModelName_Tools(t *testing.T) {
 
 func TestParseModelName_ThinkingSearch(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-thinking-search")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !thinking || !search {
@@ -68,7 +78,7 @@ func TestParseModelName_ThinkingSearch(t *testing.T) {
 
 func TestParseModelName_ToolsThinking(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-tools-thinking")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !tools || !thinking {
@@ -81,7 +91,7 @@ func TestParseModelName_ToolsThinking(t *testing.T) {
 
 func TestParseModelName_ToolsSearch(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-tools-search")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !tools || !search {
@@ -94,7 +104,7 @@ func TestParseModelName_ToolsSearch(t *testing.T) {
 
 func TestParseModelName_AllTags(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-tools-thinking-search")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !thinking || !search || !tools {
@@ -104,7 +114,7 @@ func TestParseModelName_AllTags(t *testing.T) {
 
 func TestParseModelName_ReverseOrder(t *testing.T) {
 	base, thinking, search, tools := ParseModelName("GLM-4.7-search-thinking-tools")
-	if base != "GLM-4.7" {
+	if base != "glm-4.7" {
 		t.Errorf("base = %q", base)
 	}
 	if !thinking || !search || !tools {
@@ -112,15 +122,42 @@ func TestParseModelName_ReverseOrder(t *testing.T) {
 	}
 }
 
+// ===== GLM-5 =====
+
+func TestParseModelName_GLM5(t *testing.T) {
+	base, thinking, _, _ := ParseModelName("glm-5")
+	if base != "glm-5" {
+		t.Errorf("base = %q, want %q", base, "glm-5")
+	}
+	if thinking {
+		t.Error("thinking should be false")
+	}
+}
+
+func TestGetTargetModel_GLM5(t *testing.T) {
+	target := GetTargetModel("glm-5")
+	if target != "glm-5" {
+		t.Errorf("GetTargetModel(glm-5) = %q, want %q", target, "glm-5")
+	}
+}
+
+func TestGetTargetModel_GLM5Thinking(t *testing.T) {
+	target := GetTargetModel("glm-5-thinking")
+	if target != "glm-5" {
+		t.Errorf("GetTargetModel(glm-5-thinking) = %q, want %q", target, "glm-5")
+	}
+}
+
 // ===== IsToolsModel =====
 
 func TestIsToolsModel_True(t *testing.T) {
 	tests := []string{
-		"GLM-4.7-tools",
+		"glm-4.7-tools",
 		"GLM-4.7-tools-thinking",
-		"GLM-4.7-tools-search",
+		"glm-4.7-tools-search",
 		"GLM-4.7-thinking-tools",
-		"GLM-4.5-tools",
+		"glm-4.5-tools",
+		"glm-5-tools",
 	}
 	for _, m := range tests {
 		if !IsToolsModel(m) {
@@ -131,9 +168,9 @@ func TestIsToolsModel_True(t *testing.T) {
 
 func TestIsToolsModel_False(t *testing.T) {
 	tests := []string{
-		"GLM-4.7",
+		"glm-4.7",
 		"GLM-4.7-thinking",
-		"GLM-4.7-search",
+		"glm-4.7-search",
 		"GLM-4.7-thinking-search",
 	}
 	for _, m := range tests {
@@ -143,32 +180,32 @@ func TestIsToolsModel_False(t *testing.T) {
 	}
 }
 
-// ===== IsThinkingModel / IsSearchModel 不受 -tools 影响 =====
+// ===== IsThinkingModel / IsSearchModel =====
 
 func TestIsThinkingModel_WithTools(t *testing.T) {
-	if !IsThinkingModel("GLM-4.7-tools-thinking") {
-		t.Error("IsThinkingModel should be true for GLM-4.7-tools-thinking")
+	if !IsThinkingModel("glm-4.7-tools-thinking") {
+		t.Error("IsThinkingModel should be true for glm-4.7-tools-thinking")
 	}
-	if IsThinkingModel("GLM-4.7-tools") {
-		t.Error("IsThinkingModel should be false for GLM-4.7-tools")
+	if IsThinkingModel("glm-4.7-tools") {
+		t.Error("IsThinkingModel should be false for glm-4.7-tools")
 	}
 }
 
 func TestIsSearchModel_WithTools(t *testing.T) {
-	if !IsSearchModel("GLM-4.7-tools-search") {
-		t.Error("IsSearchModel should be true for GLM-4.7-tools-search")
+	if !IsSearchModel("glm-4.7-tools-search") {
+		t.Error("IsSearchModel should be true for glm-4.7-tools-search")
 	}
-	if IsSearchModel("GLM-4.7-tools") {
-		t.Error("IsSearchModel should be false for GLM-4.7-tools")
+	if IsSearchModel("glm-4.7-tools") {
+		t.Error("IsSearchModel should be false for glm-4.7-tools")
 	}
 }
 
-// ===== GetTargetModel with -tools =====
+// ===== GetTargetModel =====
 
 func TestGetTargetModel_WithTools(t *testing.T) {
-	target := GetTargetModel("GLM-4.7-tools")
+	target := GetTargetModel("glm-4.7-tools")
 	if target != "glm-4.7" {
-		t.Errorf("GetTargetModel(GLM-4.7-tools) = %q, want %q", target, "glm-4.7")
+		t.Errorf("GetTargetModel(glm-4.7-tools) = %q, want %q", target, "glm-4.7")
 	}
 }
 
@@ -179,12 +216,14 @@ func TestGetTargetModel_WithToolsThinking(t *testing.T) {
 	}
 }
 
-// ===== ModelList 包含 -tools 变体 =====
+// ===== ModelList =====
 
 func TestModelList_ContainsToolsVariants(t *testing.T) {
 	expected := map[string]bool{
-		"GLM-4.7-tools":          false,
-		"GLM-4.7-tools-thinking": false,
+		"glm-4.7-tools":          false,
+		"glm-4.7-tools-thinking": false,
+		"glm-5":                  false,
+		"glm-5-tools":            false,
 	}
 
 	for _, m := range ModelList {

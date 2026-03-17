@@ -6,12 +6,14 @@ import (
 	"zai-proxy/internal/config"
 	"zai-proxy/internal/handler"
 	"zai-proxy/internal/logger"
+	"zai-proxy/internal/proxy"
 	"zai-proxy/internal/version"
 )
 
 func main() {
 	config.LoadConfig()
 	logger.InitLogger()
+	proxy.LoadProxies("proxies.txt")
 	version.StartVersionUpdater()
 
 	http.HandleFunc("/v1/models", handler.HandleModels)

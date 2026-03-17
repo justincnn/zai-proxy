@@ -14,6 +14,7 @@ import (
 	"zai-proxy/internal/auth"
 	"zai-proxy/internal/logger"
 	"zai-proxy/internal/model"
+	"zai-proxy/internal/proxy"
 	builtintools "zai-proxy/internal/tools"
 	"zai-proxy/internal/version"
 )
@@ -243,7 +244,7 @@ func MakeUpstreamRequest(token string, messages []model.Message, modelName strin
 	req.Header.Set("Referer", fmt.Sprintf("https://chat.z.ai/c/%s", uuid.New().String()))
 	req.Header.Set("User-Agent", uarand.GetRandom())
 
-	client := &http.Client{}
+	client := proxy.GetHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err

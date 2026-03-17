@@ -53,7 +53,16 @@ docker run -d --name zai-proxy \
   ghcr.io/yurika0211/zai-proxy:latest
 ```
 
-> 镜像支持 `linux/amd64` 和 `linux/arm64` 双平台。
+> 镜像仅支持 `linux/amd64` 平台。
+
+#### 挂载代理文件（可选）
+
+```bash
+docker run -d --name zai-proxy \
+  -p 8000:8000 \
+  -v ./proxies.txt:/app/proxies.txt \
+  ghcr.io/yurika0211/zai-proxy:latest
+```
 
 #### 可用镜像标签
 
@@ -96,6 +105,17 @@ docker compose up -d
 
 支持 `.env` 文件自动加载。
 
+## 代理池（可选）
+
+在项目根目录放置 `proxies.txt` 文件，每行一个 SOCKS5 代理，格式：
+
+```
+ip:port:username:password
+ip:port
+```
+
+启动时自动加载，每次请求随机选择一个代理。不存在该文件则直连。
+
 ## 获取 z.ai Token
 
 ### 方式一：使用匿名 Token（免登录）
@@ -106,7 +126,7 @@ docker compose up -d
 curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer free" \
   -H "Content-Type: application/json" \
-  -d '{"model": "GLM-4.7", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model": "glm-4.7", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
 ### 方式二：使用个人 Token
@@ -134,7 +154,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer YOUR_ZAI_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "GLM-4.7",
+    "model": "glm-4.7",
     "messages": [{"role": "user", "content": "hello"}],
     "stream": true
   }'
@@ -171,12 +191,13 @@ curl http://localhost:8000/v1/messages \
 
 | 模型名称 | 上游模型 | 说明 |
 |----------|----------|------|
-| `GLM-4.5` | 0727-360B-API | |
-| `GLM-4.6` | GLM-4-6-API-V1 | |
-| `GLM-4.7` | glm-4.7 | 最新 |
-| `GLM-4.5-V` | glm-4.5v | 视觉 |
-| `GLM-4.6-V` | glm-4.6v | 视觉（最新） |
-| `GLM-4.5-Air` | 0727-106B-API | 轻量 |
+| `glm-4.5` | 0727-360B-API | |
+| `glm-4.6` | GLM-4-6-API-V1 | |
+| `glm-4.7` | glm-4.7 | |
+| `glm-5` | glm-5 | 最新 |
+| `glm-4.5-v` | glm-4.5v | 视觉 |
+| `glm-4.6-v` | glm-4.6v | 视觉（最新） |
+| `glm-4.5-air` | 0727-106B-API | 轻量 |
 
 ### Claude 模型名映射
 
@@ -184,16 +205,16 @@ curl http://localhost:8000/v1/messages \
 
 | Claude 模型 | 映射到 | 备注 |
 |-------------|--------|------|
-| `claude-opus-4-6` | GLM-4.7 | 自动启用 thinking |
-| `claude-opus-4-5-20250514` | GLM-4.7 | 自动启用 thinking |
-| `claude-sonnet-4-6` | GLM-4.7 | |
-| `claude-sonnet-4-5-20241022` | GLM-4.7 | |
-| `claude-haiku-4-5` | GLM-4.5-Air | |
-| `claude-haiku-4-5-20251001` | GLM-4.5-Air | |
-| `claude-3-5-sonnet-20241022` | GLM-4.7 | |
-| `claude-3-5-haiku-20241022` | GLM-4.5-Air | |
+| `claude-opus-4-6` | glm-4.7 | 自动启用 thinking |
+| `claude-opus-4-5-20250514` | glm-4.7 | 自动启用 thinking |
+| `claude-sonnet-4-6` | glm-4.7 | |
+| `claude-sonnet-4-5-20241022` | glm-4.7 | |
+| `claude-haiku-4-5` | glm-4.5-air | |
+| `claude-haiku-4-5-20251001` | glm-4.5-air | |
+| `claude-3-5-sonnet-20241022` | glm-4.7 | |
+| `claude-3-5-haiku-20241022` | glm-4.5-air | |
 
-> Opus 系列模型始终自动启用 thinking 模式。未识别的模型名会回退到 GLM-4.7。
+> Opus 系列模型始终自动启用 thinking 模式。未识别的模型名会回退到 glm-4.7。
 
 ### 模型标签
 
@@ -206,11 +227,13 @@ curl http://localhost:8000/v1/messages \
 | `-tools` | 自动注入内置工具定义，模型可进行函数调用 |
 
 组合示例：
-- `GLM-4.7-thinking`
-- `GLM-4.7-search`
-- `GLM-4.7-thinking-search`
-- `GLM-4.7-tools`
-- `GLM-4.7-tools-thinking`
+- `glm-4.7-thinking`
+- `glm-4.7-search`
+- `glm-4.7-thinking-search`
+- `glm-4.7-tools`
+- `glm-4.7-tools-thinking`
+- `glm-5-thinking`
+- `glm-5-tools`
 
 ## 使用示例
 
@@ -218,7 +241,7 @@ curl http://localhost:8000/v1/messages \
 
 ```json
 {
-  "model": "GLM-4.6-V",
+  "model": "glm-4.6-v",
   "messages": [
     {
       "role": "user",
@@ -292,7 +315,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer YOUR_ZAI_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "GLM-4.7-tools",
+    "model": "glm-4.7-tools",
     "messages": [{"role": "user", "content": "现在几点了？"}],
     "stream": true
   }'
@@ -312,7 +335,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer YOUR_ZAI_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "GLM-4.7-tools",
+    "model": "glm-4.7-tools",
     "messages": [
       {"role": "user", "content": "现在几点了？"},
       {"role": "assistant", "content": "", "tool_calls": [
@@ -330,7 +353,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ```json
 {
-  "model": "GLM-4.7",
+  "model": "glm-4.7",
   "messages": [{"role": "user", "content": "北京天气怎么样？"}],
   "tools": [{
     "type": "function",
@@ -418,6 +441,8 @@ zai-proxy/
 │   │   ├── types.go            # OpenAI 兼容类型
 │   │   ├── anthropic.go        # Anthropic API 类型
 │   │   └── mapping.go          # 模型名映射与解析
+│   ├── proxy/                  # SOCKS5 代理池
+│   │   └── pool.go             # 代理加载与随机选择
 │   ├── tools/                  # 内置工具定义
 │   │   ├── builtin.go          # 6 个内置工具
 │   │   └── prompt.go           # 工具系统提示词构建

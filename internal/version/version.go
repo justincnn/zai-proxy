@@ -2,12 +2,12 @@ package version
 
 import (
 	"io"
-	"net/http"
 	"regexp"
 	"sync"
 	"time"
 
 	"zai-proxy/internal/logger"
+	"zai-proxy/internal/proxy"
 )
 
 var (
@@ -22,7 +22,7 @@ func GetFeVersion() string {
 }
 
 func fetchFeVersion() {
-	resp, err := http.Get("https://chat.z.ai/")
+	resp, err := proxy.GetHTTPClient().Get("https://chat.z.ai/")
 	if err != nil {
 		logger.LogError("Failed to fetch fe version: %v", err)
 		return
@@ -46,10 +46,9 @@ func fetchFeVersion() {
 }
 
 func StartVersionUpdater() {
-	fetchFeVersion()
-
-	ticker := time.NewTicker(1 * time.Hour)
 	go func() {
+		fetchFeVersion()
+		ticker := time.NewTicker(1 * time.Hour)
 		for range ticker.C {
 			fetchFeVersion()
 		}
