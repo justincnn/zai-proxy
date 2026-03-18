@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  zai-proxy:
+    image: justinzm/zai-proxy:latest
+    container_name: zai-proxy
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - LOG_LEVEL=info
+    volumes:
+      # 如果需要使用代理池，取消注释下面这行并创建 proxies.txt 文件
+      # - ./proxies.txt:/app/proxies.txt:ro
+      # 如果需要持久化日志，取消注释下面这行
+      # - ./logs:/app/logs
+    networks:
+      - zai-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  zai-network:
+    driver: bridge
