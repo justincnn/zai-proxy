@@ -1,6 +1,6 @@
 module zai-proxy
 
-go 1.21
+go 1.23
 
 require (
 	github.com/corpix/uarand v0.2.0

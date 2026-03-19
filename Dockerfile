@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apk add --no-cache git ca-certificates
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download -x || (cat go.mod && cat go.sum && exit 1)
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o zai-proxy .
