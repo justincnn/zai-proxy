@@ -2,11 +2,8 @@ FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-# 设置 Go 代理以加速依赖下载（针对国内网络）
-ENV GOPROXY=https://goproxy.cn,direct
-
 COPY go.mod go.sum ./
-RUN go mod download && go mod verify
+RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o zai-proxy .
